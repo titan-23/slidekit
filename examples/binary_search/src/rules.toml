@@ -1,0 +1,11 @@
+schema_version = 1
+forbidden_characters = ["。"]
+require_notes = true
+notes_style = "polite"
+
+[math_candidates]
+enabled = true
+variables = []
+operations = []
+# 文献一覧の著者の頭文字・版・年は数式ではないので、文献のページは検査しない。
+exclude_page_kinds = ["references"]

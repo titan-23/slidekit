@@ -1,0 +1,21 @@
+# 文字の配置を PowerPoint の表示と照合する校正用の資料。内容は汎用の例文だけにする。
+# 照合データの作り方と作り直す時期は tools/make_layout_fixture.py に書いてある。
+schema_version = 1
+entrypoint = "slides.py:build"
+size = "16:9"
+theme = "theme.toml"
+output_dir = "out"
+
+[metadata]
+title = "文字の配置の校正"
+author = "slidekit example"
+last_modified_by = "slidekit example"
+subject = "文字の幅・行送り・折り返しを PowerPoint の表示と照合する資料"
+
+[render]
+primary = "powerpoint"
+required = ["powerpoint"]
+
+# PowerPoint が描いた編集可能な数式を照合するので、互換画像は作らない。
+[math]
+fallback = "off"

@@ -1,0 +1,10 @@
+# 校正用の資料のテーマ。同梱のテーマに、11 pt などの小さい文字も許容する役割と、ページのほぼ全体を使う本文の領域を加える。
+schema_version = 1
+
+[roles.sample]
+inherits = "body"
+min_size_pt = 8
+
+[page_kinds.blank]
+default_role = "sample"
+content_area_pt = [12, 10, 936, 524]

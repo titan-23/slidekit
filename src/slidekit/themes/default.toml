@@ -1,0 +1,116 @@
+schema_version = 1
+
+[fonts]
+japanese = "Yu Gothic UI"
+latin = "Arial"
+math = "Cambria Math"
+
+[colors]
+background = "FFFFFF"
+text = "20252B"
+primary = "183153"
+accent = "C43D3D"
+muted = "606B78"
+line = "BBC5D0"
+surface = "F3F6FA"
+
+[margins]
+left = 36
+right = 36
+top = 72
+bottom = 36
+
+[defaults]
+color = "text"
+align = "left"
+valign = "top"
+line_spacing = 1.15
+padding_pt = 0
+line_width_pt = 1
+
+# 種類ごとの既定は [defaults] の上、役割の下に重なる。表のセルは box の後に、見出しはさらに table_cell の後に重ねる。
+[defaults.box]
+fill = "surface"
+line_color = "line"
+padding_pt = 6
+# 角丸の半径（pt）。shape が rounded_rectangle の図形だけに適用される。
+corner_radius_pt = 6
+
+[defaults.table_cell]
+fill = "background"
+
+[defaults.table_header]
+fill = "surface"
+
+# 独立した数式は既定で折り返さない。折り返すと PowerPoint が枠の幅で式を自動で改行し、計測の予測と合わなくなる。
+# 資料のテーマで [defaults.equation] の word_wrap = true にすると折り返す。
+[defaults.equation]
+word_wrap = false
+
+[roles.slide_title]
+size_pt = 32
+min_size_pt = 28
+color = "primary"
+bold = true
+
+[roles.cover_title]
+size_pt = 36
+min_size_pt = 28
+color = "primary"
+bold = true
+
+[roles.section_title]
+size_pt = 48
+min_size_pt = 36
+color = "primary"
+bold = true
+
+[roles.heading]
+size_pt = 24
+min_size_pt = 20
+color = "primary"
+bold = true
+
+[roles.body]
+size_pt = 20
+min_size_pt = 18
+
+[roles.note]
+size_pt = 14
+min_size_pt = 12
+color = "muted"
+
+[roles.references]
+inherits = "body"
+size_pt = 18
+min_size_pt = 16
+
+# equation() が役割を指定しないときに使う。body と同じ値で、資料のテーマで文字サイズや揃えを上書きして使う。
+[roles.equation]
+inherits = "body"
+
+[page_kinds.cover]
+title_role = "cover_title"
+title_area = [0.10, 0.25, 0.80, 0.22]
+content_area = [0.10, 0.52, 0.80, 0.32]
+page_number = false
+
+[page_kinds.section]
+title_role = "section_title"
+title_area = [0.10, 0.32, 0.80, 0.22]
+content_area = [0.10, 0.60, 0.80, 0.24]
+page_number = true
+
+[page_kinds.content]
+title_role = "slide_title"
+title_area = [0.0375, 0.025, 0.925, 0.085]
+page_number = true
+
+[page_kinds.references]
+title_role = "slide_title"
+title_area = [0.0375, 0.025, 0.925, 0.085]
+default_role = "references"
+page_number = true
+
+[page_kinds.blank]
+page_number = false

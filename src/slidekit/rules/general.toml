@@ -1,0 +1,14 @@
+# 一般向けの記述規則。資料の rules.toml はこの値を上書きする。
+schema_version = 1
+forbidden_characters = []
+require_notes = false
+notes_style = "unrestricted"
+
+[math_candidates]
+enabled = false
+numbers = true
+variables = []
+operations = []
+exclude_patterns = []
+exclude_roles = []
+exclude_page_kinds = []

@@ -1,0 +1,36 @@
+{
+  "artifacts": {
+    "../notes.md": "87d887489f5a1895b6e08b8a09b03fe4e8886e5415a0644d33e6204c585fde5f",
+    "../proposal.pdf": "918f82d76bc7a16c516fac0e6a49aaff2fa23eecf494a68c624e9837ccf97a3c",
+    "../proposal.pptx": "4b21c243cbe747e5532a6ef4d7884c8d8d70f91ac67853c6bd9f1bbdd3cc3902"
+  },
+  "exported_at": "2026-10-20T12:50:58.563292+00:00",
+  "final_check": {
+    "checked_at": "2026-10-20T12:50:58.558657+00:00",
+    "sha256": "0ab481a322bb78a30c373bf00cd87ea3cf1a8c7a2fcad4a8dbb833861dab52bf",
+    "summary": {
+      "errors": 0,
+      "reviewers": [
+        "Claude（AI）"
+      ],
+      "reviews": {
+        "carried": 9,
+        "renumbered": 0,
+        "required": 10,
+        "satisfied": 10
+      },
+      "warnings": {
+        "accepted": 0,
+        "declared": 0,
+        "total": 0,
+        "unaccepted": 0
+      }
+    }
+  },
+  "manifest_hash": "1024a62f53ce79f08b0600e7d8858a820ea5a566e54b4f926b5182e45ea3d10b",
+  "project": "deck.toml",
+  "review_hash": "a19fdd6d272b5be525158d8a02938b37df84c2ac3b4432fb7a1b06ae50689604",
+  "run": "out/runs/0015",
+  "run_id": "0015",
+  "schema_version": 2
+}

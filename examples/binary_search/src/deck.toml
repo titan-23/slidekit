@@ -1,0 +1,42 @@
+schema_version = 1
+entrypoint = "slides.py:build"
+size = "4:3"
+theme = "theme.toml"
+rules = "rules.toml"
+output_dir = "out"
+
+[metadata]
+title = "二分探索の考え方"
+author = "slidekit example"
+last_modified_by = "slidekit example"
+subject = "雛形、図、数式、表、文献を使う 4:3 の生成例"
+
+[inputs]
+read_roots = ["."]
+bibliography = ["references.bib"]
+asset_dirs = ["figures"]
+
+# 図を作るスクリプト。8 ページ目の図の出典に使う。
+[[inputs.documents]]
+id = "figure_script"
+path = "make_figure.py"
+
+[template]
+path = "template.pptx"
+layout_index = 6
+show_master_shapes = false
+
+[render]
+primary = "powerpoint"
+required = ["powerpoint"]
+
+# 数式を含むすべての要素に互換画像を付ける。
+[math]
+fallback = "required"
+
+# 完成物は資料のディレクトリの直下（src/ の一つ上）に置く。
+[deliverables]
+pptx = "../binary_search.pptx"
+pdf = "../binary_search.pdf"
+notes = "../speaker_notes.md"
+record = "deliverables.json"

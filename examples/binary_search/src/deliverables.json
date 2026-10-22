@@ -1,0 +1,36 @@
+{
+  "artifacts": {
+    "../binary_search.pdf": "1373d8fe325151c4c70d12e66ac0d1b6be5b1ad5813f251201031017d17d22b6",
+    "../binary_search.pptx": "d1f95722d48bf35341618feef5049ccefe63df142037acc9a8de7a2c564ed235",
+    "../speaker_notes.md": "41df6cabfd6252b45c81a8fd246983224d90dc21568c05d79b08a85ad99211d9"
+  },
+  "exported_at": "2026-10-20T12:50:36.936859+00:00",
+  "final_check": {
+    "checked_at": "2026-10-20T12:50:36.932006+00:00",
+    "sha256": "7dfc9b11fbe7278f88f1f5d886064b9841dfe26664132258c33a07faf781f7c4",
+    "summary": {
+      "errors": 0,
+      "reviewers": [
+        "Claude（AI）"
+      ],
+      "reviews": {
+        "carried": 25,
+        "renumbered": 0,
+        "required": 27,
+        "satisfied": 27
+      },
+      "warnings": {
+        "accepted": 0,
+        "declared": 2,
+        "total": 2,
+        "unaccepted": 0
+      }
+    }
+  },
+  "manifest_hash": "369138d1a8045a29b83d3958c67ad3669fb3f68446c40022971e9e25e97a55b8",
+  "project": "deck.toml",
+  "review_hash": "4c6a9d41b281d5af96483844fa8ffcded6af24fa591e92195a3e3e5628927aa9",
+  "run": "out/runs/0006",
+  "run_id": "0006",
+  "schema_version": 2
+}

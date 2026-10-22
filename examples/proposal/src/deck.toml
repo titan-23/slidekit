@@ -1,0 +1,32 @@
+schema_version = 1
+entrypoint = "slides.py:build"
+size = "16:9"
+theme = "theme.toml"
+rules = "rules.toml"
+output_dir = "out"
+
+[metadata]
+title = "資料作成フローの提案"
+author = "slidekit example"
+last_modified_by = "slidekit example"
+subject = "編集可能な図と数式を使う、汎用資料の生成例"
+
+[inputs]
+read_roots = ["."]
+bibliography = []
+asset_dirs = []
+
+[render]
+primary = "powerpoint"
+required = ["powerpoint"]
+
+[math]
+fallback = "required"
+fallback_renderer = "powerpoint"
+
+# 完成物は資料のディレクトリの直下（src/ の一つ上）に置く。
+[deliverables]
+pptx = "../proposal.pptx"
+pdf = "../proposal.pdf"
+notes = "../notes.md"
+record = "deliverables.json"

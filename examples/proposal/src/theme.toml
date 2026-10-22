@@ -1,0 +1,7 @@
+schema_version = 1
+
+# equation() が使う同梱の役割 equation（body を継承する）の文字サイズと色を上書きする。
+[roles.equation]
+size_pt = 30
+min_size_pt = 24
+color = "primary"

@@ -1,0 +1,10 @@
+schema_version = 1
+forbidden_characters = ["。"]
+require_notes = true
+notes_style = "polite"
+
+[math_candidates]
+enabled = true
+variables = ["n", "T"]
+operations = []
+exclude_patterns = []

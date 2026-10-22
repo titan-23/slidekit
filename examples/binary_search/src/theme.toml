@@ -1,0 +1,128 @@
+schema_version = 1
+
+[colors]
+background = "FFFFFF"
+text = "1F2328"
+primary = "1F4E79"
+accent = "C55A11"
+muted = "5F6B7A"
+line = "8EA9C1"
+surface = "EAF1F8"
+
+[roles.slide_title]
+size_pt = 28
+min_size_pt = 26
+color = "FFFFFF"
+bold = true
+
+[roles.cover_title]
+size_pt = 36
+min_size_pt = 30
+color = "primary"
+bold = true
+
+[roles.section_title]
+size_pt = 36
+min_size_pt = 32
+color = "primary"
+bold = true
+
+[roles.heading]
+size_pt = 22
+min_size_pt = 20
+color = "primary"
+bold = true
+
+[roles.body]
+size_pt = 20
+min_size_pt = 18
+
+[roles.note]
+size_pt = 16
+min_size_pt = 14
+color = "muted"
+
+[roles.references]
+inherits = "body"
+size_pt = 16
+min_size_pt = 14
+
+# 同梱の役割 equation（equation() の既定）を上書きし、表示用の数式を大きく、主の色にする。数式だけに使う。
+[roles.equation]
+size_pt = 28
+min_size_pt = 24
+color = "primary"
+allowed_content = "math"
+
+# 表のセルのうち、内容が数式だけのセル（table() の math_role）。
+[roles.table_math]
+inherits = "body"
+color = "primary"
+allowed_content = "math"
+
+# 図の軸名。本文より小さいので、使う場所を限る（要素やページの allow_roles で宣言して使う）。
+[roles.chart_label]
+inherits = "note"
+size_pt = 14
+min_size_pt = 12
+restricted = true
+
+[page_kinds.cover]
+title_role = "cover_title"
+title_area_pt = [60, 130, 600, 110]
+title_style = { align = "center", valign = "bottom" }
+content_area_pt = [60, 250, 600, 230]
+page_number = false
+
+# 章扉の飾り：題名の下に、両端にひし形を置いた線を引く。
+[page_kinds.section]
+title_role = "section_title"
+title_area_pt = [80, 160, 560, 90]
+title_style = { align = "right", valign = "bottom" }
+content_area_pt = [80, 292, 560, 120]
+page_number = true
+footer_area_pt = [0, 505, 720, 35]
+footer_style = { color = "FFFFFF", fill = "primary", padding_pt = 6 }
+
+[[page_kinds.section.decorations]]
+kind = "line"
+id = "rule"
+start_pt = [92, 272]
+end_pt = [628, 272]
+line_color = "primary"
+line_width_pt = 2
+
+[[page_kinds.section.decorations]]
+kind = "box"
+id = "rule_start"
+shape = "diamond"
+area_pt = [80, 266, 12, 12]
+fill = "primary"
+line_color = "primary"
+
+[[page_kinds.section.decorations]]
+kind = "box"
+id = "rule_end"
+shape = "diamond"
+area_pt = [628, 266, 12, 12]
+fill = "primary"
+line_color = "primary"
+
+[page_kinds.content]
+title_role = "slide_title"
+title_area_pt = [0, 0, 720, 64]
+title_style = { fill = "primary", padding_pt = { left = 16, right = 16, top = 8, bottom = 8 }, valign = "middle" }
+content_area_pt = [36, 80, 648, 412]
+page_number = true
+footer_area_pt = [0, 505, 720, 35]
+footer_style = { color = "FFFFFF", fill = "primary", padding_pt = 6 }
+
+[page_kinds.references]
+title_role = "slide_title"
+title_area_pt = [0, 0, 720, 64]
+title_style = { fill = "primary", padding_pt = { left = 16, right = 16, top = 8, bottom = 8 }, valign = "middle" }
+content_area_pt = [36, 96, 648, 396]
+default_role = "references"
+page_number = true
+footer_area_pt = [0, 505, 720, 35]
+footer_style = { color = "FFFFFF", fill = "primary", padding_pt = 6 }

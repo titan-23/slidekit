@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "slidekit"
+version = "0.2.0"
+description = "編集可能な PowerPoint 資料をローカルで生成・検査する"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "titan" }]
+dependencies = [
+  "python-pptx==1.0.2",
+  "Pillow==12.3.0",
+  "fonttools==4.66.1",
+  "pypdfium2==5.14.0",
+  "pypdf==6.21.1",
+  "lxml==6.1.3",
+]
+
+[project.urls]
+Repository = "https://github.com/titan-23/slidekit"
+
+[project.optional-dependencies]
+# 旧版の導入コマンド（.[math]）が警告なく動くように名前だけを残す。数式の計測は必須の依存（fontTools）で行う
+math = []
+svg = ["CairoSVG==2.9.1", "tinycss2==1.5.1"]
+bibliography = ["bibtexparser==2.1.0", "pylatexenc==2.11"]
+test = ["pytest==9.1.1", "pytest-xdist==3.8.0", "reportlab==5.0.1"]
+dev = ["black==26.10.1"]
+
+[project.scripts]
+slidekit = "slidekit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+slidekit = ["themes/*.toml", "rules/*.toml", "renderers/*.ps1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+# -n は入れない（xdist がない環境と PowerPoint の試験では、実行に失敗するため）。並列化は実行するコマンドで指定する。
+addopts = "-ra --strict-markers"
+markers = [
+  "powerpoint: 実機の PowerPoint または Windows の PowerShell を使う。SLIDEKIT_TEST_POWERPOINT=1 のときだけ実行し、直列に実行する",
+  "examples: 同梱の使用例を構築する。Windows の既定フォントがなければ省略する",
+]
+
+[tool.black]
+line-length = 120
+target-version = ["py312", "py313", "py314"]

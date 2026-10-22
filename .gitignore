@@ -1,0 +1,15 @@
+.venv/
+.env
+.env.*
+.aws/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+**/out/
+environment.local.toml
+.slidekit-export.lock
+
+memo.md
