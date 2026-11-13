@@ -195,6 +195,23 @@ def _overflow(outer: tuple, inner: tuple) -> dict:
     return {"side": side, "amount": round(amounts[side], 2)}
 
 
+def _stack_summary(elements: Sequence[Mapping], bounds: tuple) -> dict:
+    """同じ積み上げの領域（layout_bounds）に置いた要素の全体で、下端を超える量と、各要素の高さ。
+
+    1 つの要素を縮めても足りないときに、積み上げの全体でどれだけ詰めればよいかを示すために使う。
+    """
+    members = [
+        (element.get("id"), area)
+        for element in elements
+        if _rect(element.get("layout_bounds")) == bounds and (area := _rect(element.get("area"))) is not None
+    ]
+    bottom = max(area[1] + area[3] for _id, area in members)
+    return {
+        "stack_overflow_pt": round(max(0.0, bottom - bounds[1] - bounds[3]), 2),
+        "stack_elements": [{"id": identifier, "height_pt": round(area[3], 2)} for identifier, area in members],
+    }
+
+
 def _drawn_area(element: dict, area: tuple) -> tuple:
     """重なりの判定に使う、実際に描く範囲。画像は作成 API が決めた actual_area（contain では余白を除く。不正なら領域）である。"""
     if element.get("kind") == "image":
@@ -654,7 +671,12 @@ def validate_scene(scene: dict, project: Any, fonts: Any, *, layouts: Mapping | 
                     "layout_bounds_overflow",
                     "積み上げた要素が指定した領域を超えている",
                     element,
-                    observations={"area": list(area), "bounds": list(bounds), "overflow_pt": _overflow(bounds, area)},
+                    observations={
+                        "area": list(area),
+                        "bounds": list(bounds),
+                        "overflow_pt": _overflow(bounds, area),
+                        **_stack_summary(elements, bounds),
+                    },
                 )
             # ページ・本文領域・積み上げの領域は配置した領域で、重なりは実際に描く範囲で判定する。
             valid.append((element, _drawn_area(element, area)))
@@ -706,6 +728,31 @@ def _declaration_matches(declaration: Mapping, issue: Mapping) -> bool:
     if related is None:
         return element in {issue.get("element_id"), issue.get("related_element_id")}
     return {element, related} == {issue.get("element_id"), issue.get("related_element_id")}
+
+
+def skip_role_checks(issues: list[dict], scene: dict) -> list[dict]:
+    """テーマの役割の skip_checks に挙げた警告と参考を、その役割の要素の診断から除く。入力は変更しない。
+
+    対象は診断の要素（組の診断では最初の要素）の役割である。エラーは除かない（設定の検査が指定を拒む）。
+    """
+    roles = (scene.get("theme") or {}).get("roles") or {}
+    skipped = {
+        name: set(role.get("skip_checks") or ())
+        for name, role in roles.items()
+        if isinstance(role, Mapping) and role.get("skip_checks")
+    }
+    if not skipped:
+        return issues
+    element_roles = {}
+    for slide in scene.get("slides", []):
+        for element in slide.get("elements", []):
+            element_roles[(slide.get("id"), element.get("id"))] = element.get("role") or "body"
+    return [
+        issue
+        for issue in issues
+        if issue.get("severity") == "error"
+        or issue.get("code") not in skipped.get(element_roles.get((issue.get("slide_id"), issue.get("element_id"))), ())
+    ]
 
 
 def apply_declarations(issues: list[dict], scene: dict) -> list[dict]:

@@ -25,6 +25,7 @@
 | `font_latin` | `text`・`box`・`equation`・`table_cell`・`table_header` | 欧文の書体 | 書体名 | テーマの `fonts.latin` |
 | `font_math` | `text`・`box`・`equation`・`table_cell`・`table_header` | 数式の書体（MATH 表が要る） | 書体名 | テーマの `fonts.math` |
 | `word_wrap` | `text`・`box`・`equation`・`table_cell`・`table_header` | 枠の幅で自動的に折り返すか | 真偽値 | `true`（同梱テーマの `equation` は `false`） |
+| `phrase_wrap` | `text`・`box`・`equation`・`table_cell`・`table_header` | 和文の文字の間では文節の境だけで折り返し、その位置に明示改行を入れて書き出す（文節は BudouX で判定し、内側の幅より長い文節の中では今までどおり折り返す） | 真偽値 | `false` |
 | `fill` | `text`・`box`・`equation`・`table_cell`・`table_header` | 塗りの色。`"none"` と `None` は塗らない | 色か `"none"` | 塗らない（同梱テーマの `box` は `surface`、本文のセルは `background`、見出しは `surface`） |
 | `line_color` | `text`・`box`・`equation`・`table_cell`・`table_header`・`line`・`arrow` | 枠線・線の色。文字枠では `"none"` と `None` は線なし | 色か `"none"` | 文字枠は線なし（同梱テーマの `box` と表のセルは `line`）、線と矢印は `color` |
 | `line_width_pt` | `text`・`box`・`equation`・`table_cell`・`table_header`・`line`・`arrow` | 枠線・線の太さ | 0 以上の数（pt） | `1` |
@@ -70,7 +71,7 @@
 | `slide.table` | `id`、`rows`、`row_keys`、`column_keys`、`area` | [表](usage.md#表)の引数、書式（すべてのセル。表全体の層） | `Table` |
 | `slide.group` | `id` | `area`（既定は大きさ 0）、`role`、`pptx_group`（`None`・`True`・`False`）、`description`、`allow_roles`、`sources` | まとまり |
 | `slide.references` | `id` | `keys`（既定は出典の文献キー）、`area`（既定は本文領域）、`formatter`、`gap_pt`（既定 8）、`role`、`pptx_group`（既定 `False`）、書式 | まとまり |
-| `slide.stack` | `area` | `gap`（既定 12） | 積み上げの補助 |
+| `slide.stack` | `area` | `gap`（既定 12）、`avoid`（避ける領域。`Rect` か `"footer"`（ページ番号の領域）か、その列） | 積み上げの補助 |
 | `slide.measure` | `text` | `kind`（`text`・`box`・`equation`）、`width`、`role`、`shape`、`style`、書式 | `TextLayout` |
 | `slide.allow_warning` | `code`、`reason` | `element`、`related` | なし |
 
@@ -80,6 +81,8 @@
 `vector` は SVG の素材を SVG でも埋め込むかで、PDF・SVG の素材だけに指定できる。PDF の素材には真を指定できない（PNG だけにする）。
 
 公開の名前：`slidekit` の `Deck`・`Rect`・`Text`・`Emphasis`・`Math`・`Table`（表の戻り値の型）・`align`・`distribute`・`key_id`、`slidekit.markup` の `parse`。
+断片の `Text`・`Emphasis` は `bold`・`color`・`size_pt`・`underline`・`link`・`superscript`（上付き）、`Math` は `bold`・`color`・`size_pt`・`emphasis` を受け取る（[文章の断片と記法](usage.md#文章の断片と記法)）。
+ページは `footer_area`（ページ番号の領域。番号を置かないページは `None`）を持つ。
 生成関数が受け取る `context`（`Project`）は、`selection`・`selected()`・`bibliography`・`fonts`・`measure_text()`・`measure_math()` を持つ。
 `Deck` は `slide()`・`cited_keys()`（出典の文献キーを初めて現れた順に返す）・`bibliography`（文献）を持つ。
 要素は `id`・`area`（代入できる）・`anchor(side, gap=0, at=0.5)`・`measure()`・`move(dx, dy)` を持ち、`Table` はさらに `cell(行キー, 列キー)`・`row_keys`・`column_keys`・`column_widths`・`row_heights` を持つ。
@@ -87,7 +90,7 @@
 
 ## 資料の設定（deck.toml）
 
-相対パスはその設定を書いた `deck.toml` の場所を基準にする。`inputs.documents` は `id` と `path` を持つ表の配列である。
+相対パスはその設定を書いた `deck.toml` の場所を基準にする。`inputs.documents` は `id` と `path`（と任意の `affects_content`）を持つ表の配列である。
 
 | 設定 | 値 | 既定値 | 内容 |
 |---|---|---|---|
@@ -112,7 +115,7 @@
 | `metadata.version` | 文字列 | なし | 版 |
 | `inputs.read_roots` | パスの配列 | `["."]` | 作成 API が読む入力の範囲。継承したときは継承元の `deck.toml` のディレクトリも加わる |
 | `inputs.python` | パスの配列 | `[]` | 任意。生成関数から読み込まれない Python ファイルを追跡するときに書く。入口と、構築の間に読み込まれた範囲内の Python ファイルは自動で追跡する |
-| `inputs.documents` | `id` と `path` を持つ表の配列 | `[]` | 元資料。出典の `document_id` で参照する |
+| `inputs.documents` | `id` と `path` と任意の `affects_content`（既定 `true`）を持つ表の配列。`affects_content` を `false` にした文書はページの内容に影響しない参考の文書として、生成記録の照合（`input_changed`）と内容の確認の証拠から外す | `[]` | 元資料。出典の `document_id` で参照する |
 | `inputs.bibliography` | `.bib` のパスの配列 | `[]` | 文献ファイル。追加依存 `bibliography` が要る |
 | `inputs.asset_dirs` | パスの配列 | `[]` | 素材のディレクトリ |
 | `render.primary` | `powerpoint`・`libreoffice` | `"powerpoint"` | 主表示ソフト。下書きと `deck.pdf` に使う |
@@ -167,6 +170,7 @@
 | `allowed_content` | 内容の種類を限る | `math`（数式だけ）か `text`（文字だけ） |
 | `restricted` | 真なら、`allow_roles` で宣言した場所だけで使用できる | 真偽値 |
 | `allowed_slide_ids` | 宣言がなくても使用を認めるページの識別子 | 識別子の配列 |
+| `skip_checks` | この役割の要素に出さない警告と参考の診断（例：書誌の行の `math_not_marked`）。エラーは指定できない。継承先にも及ぶ | 診断の識別子の配列 |
 
 同梱の役割は `slide_title`（32 pt、最小 28）、`cover_title`（36 pt、最小 28）、`section_title`（48 pt、最小 36）、`heading`（24 pt、最小 20）、
 `body`（20 pt、最小 18）、`note`（14 pt、最小 12）、`references`（`body` を継承、18 pt、最小 16）、`equation`（`body` を継承。役割を指定しない `equation()` が使う）である。
@@ -183,6 +187,7 @@
 | `content_area_pt` | 本文領域（`content_area` より優先） | pt |
 | `default_role` | 要素の既定の役割 | 役割名（省略すると `body`） |
 | `page_number` | ページ番号を置く | 真偽値 |
+| `page_number_format` | ページ番号の書式。`{page}` をページ番号に、`{total}` を全体のページ数に置き換える（省略すると `"{page}"`。例：`"{page} / {total}"`） | `{page}` を含む文字列 |
 | `footer_area_pt` | ページ番号の領域（省略するとページの右下の幅 36 pt・高さ 20 pt） | pt |
 | `footer_style` | ページ番号の書式（役割は `note`、右揃え） | 文字の書式の表 |
 | `background` | 背景の塗り（省略すると色 `background`）。`"none"` は背景の図形を作らない（雛形のマスターの図形を見せるときに使う） | 色か `"none"` |

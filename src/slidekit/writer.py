@@ -77,6 +77,8 @@ from .styles import COLOR_KEYS, LIBRARY_DEFAULTS, fragment_style
 ZERO_WIDTH_SPACE = "​"
 # 欧文の kern を使う最小の文字サイズ（1/100 pt）。計測の kerning_min_size_pt と同じ値にする。
 KERN = str(round(MODEL.kerning_min_size_pt * 100))
+# 上付きの断片の基準線のずらし（a:rPr の baseline。1/1000 % 単位。PowerPoint の上付きの既定の 30 %）。
+SUPERSCRIPT_BASELINE = str(round(MODEL.superscript_offset_em * 100000))
 # 段落の行の分け方。日本語の禁則を使い、欧文の語の途中で分けず、句読点をぶら下げない。
 LINE_BREAKING = {"eaLnBrk": "1", "latinLnBrk": "0", "hangingPunct": "0"}
 # リンクの文字をテーマのリンクの色でなく文字の色で表示させる拡張（Office 2019 以降）。
@@ -310,6 +312,8 @@ def _character_properties(properties, own: Mapping, style: Mapping, *, forced: s
     font.bold = bool(own.get("bold"))
     if own.get("underline"):
         properties.set("u", "sng")
+    if own.get("superscript"):
+        properties.set("baseline", SUPERSCRIPT_BASELINE)
     if own.get("color"):
         font.color.rgb = _color(own["color"])
     latin = style.get("font_latin")

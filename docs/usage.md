@@ -180,6 +180,9 @@ slide.box(id="note", area=Rect(60, 400, 400, None), text="補足", style=callout
 - 12 pt 以上の文字は欧文の書体の kern 表で字間を詰める。断片の境界でも、書体・大きさ・太さが同じで書体の区切りをまたがなければ詰める。
 - 折り返しの位置が幅の限界に近い要素は、参考の診断 `text_wrap_near_limit` で知らせる。行数は生成後の PDF の検査で確かめる。
 - 図形の文字領域は形で決まる。ひし形は外形の中央の幅・高さとも半分、楕円は約 0.71 倍、角丸の長方形は角の半径の約 0.29 倍だけ内側で、その中で折り返す。
+- 自動で折り返した段落の最後の行が短い要素（`text_short_line`）、和文の文節の途中で折り返した要素（`text_wrap_mid_phrase`）、欧文の語のハイフンの後で折り返した要素（`text_wrap_hyphen`）は、参考の診断で知らせる。文節の境は BudouX の日本語のモデルで判定する。行の文字列は `slidekit layout --wraps` で見る。
+- 書式 `phrase_wrap=True`（テーマの `[defaults]` や役割にも書くことができる）は、和文の文字の間を文節の境だけで折り返す。内側の幅より長い文節の中は今までどおり折り返す。PowerPoint は和文の文字の間ならどこでも折り返すので、場面を作るときに、計測した折り返しの位置へ明示改行を入れて書き出す（要素の枠の幅で折り返しを固定する。PPTX を編集して幅を変えると、明示改行の位置は変わらない）。
+- 数式の描画が送り幅より左右へ張り出す分（入れ子の分数の線など）も、インクの範囲として、はみ出しと余白への入り込みの判定に使う。文字の送り（行の幅と揃え）は送り幅で決める。
 
 書体は文字ごとに選ぶ。和文の文字は `font_japanese`、それ以外は `font_latin` で書き、欧文の書体にない記号は和文の書体で書く。
 幅の曖昧な記号は、PowerPoint が既定で描く書体と同じ書体で計測して書き出す。
@@ -197,29 +200,36 @@ slide.box(id="note", area=Rect(60, 400, 400, None), text="補足", style=callout
 
 ### 行の配置
 
-行の位置も PowerPoint の配置に合わせて計算する。計測の方式を変えたときは `measure.MEASURE_VERSION` を上げる（今は 7）。版は生成記録と診断の証拠に入る。
+行の位置も PowerPoint の配置に合わせて計算する。計測の方式を変えたときは `measure.MEASURE_VERSION` を上げる（今は 9）。版は生成記録と診断の証拠に入る。
 以下で s は文字サイズ、sp は行間である。行間 `line_spacing` は文字サイズの 1.2 倍を 1 とする倍率で、`line_spacing_pt` は 1.2 × s で割った行間として扱う。
 
 - 行の書体の組は欧文の書体と、行の文字を計測した書体である。和文の文字を含む行には和文の書体も加え、空の行と半角空白だけの行は欧文の書体だけにする。
   書体ごとに A_f = 1.2 × usWinAscent ÷ (usWinAscent + usWinDescent)、D_f = 1.2 − A_f を求め（OS/2 表の値）、組の上の割合を A = 1.2 × A* ÷ (A* + D*)、下の割合を D = 1.2 − A とする（A*・D* は組の A_f・D_f の最大）。
 - 行の上側は、行間がちょうど 1 なら A × s、1 より大きければ sp × min(A, 0.9035) × s、1 未満なら max(A − 1.2 × (1 − sp), sp × min(A, 0.9035)) × s である。行送りは前の行の下側（1.2 × sp × s − 上側）と次の行の上側の和で、同じ組の行どうしは 1.2 × sp × s になる。
 - 文字のまとまりの下端は最後の基線から D × s で、行間によらない。
-- 数式は、数式の寸法から決めた上下で行を広げる。ほとんどの式は行間 1.0 の上下（数式の計測の値。上側を L とする）に行間を掛ける。行間がちょうど 1 の行の上側は、インクの上 + 0.147 em 以上にする。
+- 数式は、数式の寸法から決めた上下で行を広げる。数式の計測の上側を L とする。行間がちょうど 1 の行の上側は、インクの上 + 0.147 em 以上にする。
 - 分数（横書きの `/` を除く）・`\binom`・伸びる括弧・大型演算子・下に置くものを含む背の高い式（インクの上下の和が文字サイズを超える式）は、a = インクの上 + 0.147 em（行の組の行間 1.0 の上側を下限にする）、d = インクの下、h = a + d とする。
   インクの上下の和が 1.3 em 以上の式と、下に置くもの（`\underset`・`\limits` の下）を含む式は、行間で増える分 e = (sp − 1) × h が 1.17 × d 以下ならすべてを行の上に、超えれば 4 分の 3 を上に置き、残りを下に置く。
+  行間が 1 より大きいときは、上側を全高 sp × h の 4 分の 3 以下に抑え、減らした分を下に回す。分子側の入れ子などで上に偏る式も、行全体の高さは保つ。
   それより低い式は、上側を 1.2 × sp × インクの上、下側を d にする。どちらも上側は sp × L より小さくしない。文字の段落の最後の行の下側は d で、行間を掛けない。
   行間 1 未満の背の高い式は確かめていないので、上側を max(sp × L, 1.2 × sp × インクの上)、下側を行間 1.0 の下側 × sp にする。
 - 文中の背の高い根号は行間 1 以上で次のように置く。当てはまるのは、根号を含み、分数などを含まず、根号の外に上へ出る部分（上付きの添字、上に置くもの、アクセント、上線）がなく、
   インクの上下の和が文字サイズを超える式である（根号の中の添字などは問わない）。行の上側は、行間がちょうど 1 なら T1 = max(L, 1.22 × インクの上)、
   1 より大きければ max(sp × L, 1.17 × sp × インクの上) にする。次の行への行送りに使う下側は sp × (T1 + d) − 上側、最後の行の下側は d である。
   独立した数式の根号と、行間 1 未満の行には当てない（ほかの数式と同じに置く）。
-- 行間が 1 より大きい文字の段落の行で、上の規則に当たらない数式の下 d が組の下 D × s より深いときは、行の上側に 0.5 × sp × (d − D × s) を加え、最後の行の下側を d にする（行間 1.2 で確かめた）。
+- 上の規則に当たらない数式の行間 1.0 の上側 T = max(L, インクの上 + 0.147 em) が文字の上側 A × s より高いときは、
+  H = T + max(数式の計測の下側, D × s) を行の全高とする。行間が 1 より大きい文字の段落では、sp × H の 4 分の 3 を基線の上、残りを下に置く。
+  独立した数式だけの行と、これより低い式では、数式の計測の上下に行間を掛ける。
+- 行間が 1 より大きい文字の段落では、分数などの専用の規則に当たらない数式と文中の背の高い根号の下 d が組の下 D × s より深いとき、文字から求めた上側に 0.5 × sp × (d − D × s) を加える。行の上側はその値と数式から求めた上側の大きい方にし、最後の行の下側は d にする（行間 1.2 で確かめた）。
 - 独立した数式だけの行は「数式だけの行」として置き、文中の数式だけの段落は欧文の書体の文字の行として置く。
 - 行のインクの下端は、基線より上だけの字形（× や “ など）の行では負になる（生成記録の `ink_bottom_pt` も同じ）。
 - PDF の読み取りでは、枠の外に描かれた数式の字形を、最も近い枠の要素に割り当てる。
 
 確かめた範囲は、PowerPoint 16.0（build 20430）の校正用の資料の 18〜28 pt、行間 1.0〜2.0 である。行間 1 未満は 0.9 だけを確かめた。
+上付きに横分数・斜線・上下の分数がある行は、12・20・32 pt、行間 1.0・1.15・1.2・1.5、欧文・和文・複数行と縦の揃えを変えて確かめた。
+分子側が入れ子の分数の行は、12・20・32 pt、行間 1.0〜2.0、文中・独立した数式と縦の揃え・複数行を確かめた。
 行間で増える分の分け方の境（e ÷ d が 1.17 の近く）は確かめていない。
+分母側が高い入れ子分数では、行間 2.0 で基線が合わないケースがある（[未解決の問題](issues.md)）。
 
 ## 寸法と配置を決める
 
@@ -247,11 +257,24 @@ area = stack.take(120)          # 高さ 120 pt の領域を受け取り、自�
   幅の既定は領域の幅から `indent` を除いた幅、高さの既定は内容から決める。`place` は幅が領域より狭いときの横位置（`left`・`center`・`right`）で、文字の揃え `align` とは別である。`gap` はその要素の後の間隔である。
 - `take(height)` は領域を返して進み、`space(amount)` は位置を下げる。`cursor`（次の上端）、`remaining`（残りの領域）、`elements`（置いた要素）を読むことができる。
 - 例外になるのは幅が領域を超えたときだけである。領域の高さが数値なら、高さを超えた要素や `take` の領域は配置の検査が `layout_bounds_overflow` で報告する。
+  その診断は、同じ積み上げの領域に置いた要素の全体で足りない量（`stack_overflow_pt`）と各要素の高さ（`stack_elements`）も示す。どの要素をどれだけ詰めればよいかを、1 回の検査で判断できる。
+- `slide.stack(area, gap=12, avoid="footer")` は、ページ番号の領域を避けて積む。`avoid` には `Rect` か `"footer"`、またはその列を書く。幅を指定しない要素が避ける領域に重なるときは、領域の左に収まるように幅を縮めて作り直す（左に領域の幅の半分以上が残らなければ、領域の下へ送る）。幅を指定した要素は動かさない。
+  ページ番号の領域は `slide.footer_area`（番号を置かないページは `None`）で読むことができる。
 
 `slide.measure(text, kind="text", width=None, role=None, shape="rectangle", style=None, **書式)` は、要素を作るときと同じ書式の解決で内容を計測し、
 `measure.TextLayout` を返す（要素は作らない）。`layout.height` は `Rect(x, y, w, None)` で決まる高さ、`layout.width` は枠の幅（`width` を省くと `Rect(x, y, None, h)` で決まる幅）である。
 `kind` は `text`・`box`・`equation`、`width` は枠の幅（`None` なら折り返さない）である。使う場所を限った役割も宣言なしで計測できる。
+`layout.lines` の各行は、文字列（`text`。数式は `$…$`）、幅、行末の自動の折り返しの種類（`wrap`）を持つ。`layout.natural_width` は折り返さないときの最も広い行の幅で、1 行に収めるのに要る内側の幅である。
 `element.measure()` は作った要素を今の書式と枠で計測する（配置の検査と同じ値）。
+
+同じ計測はコマンドでも行うことができる。資料を作り直さずに、文が 1 行に収まるかや、どこで折り返すかを確かめるのに使う。
+
+```sh
+slidekit measure --project deck.toml --width content "比較のたびに探す範囲を半分にする" "短い文"
+slidekit measure --project deck.toml --width 618 --role note --markup '書誌 $O(\log n)$ の行'
+```
+
+要約は文字列ごとに行数・枠の高さ・各行の文字列と幅を示し、折り返したときは 1 行に収める枠の幅を添える。`--width content` はページ種別（`--page-kind`、既定 `content`）の本文領域の幅である。
 `context.measure_text()`・`context.measure_math()` は互換用の低水準の関数である。`slide.measure()` を勧める。
 
 領域の計算には次を使う。
@@ -333,11 +356,12 @@ decision.arrow(id="to_left", start=ask.anchor("left"), end=left.anchor("top", ga
 
 | 断片 | 意味 | 引数 |
 |---|---|---|
-| `Text(文字列)` | 通常の文字 | `bold`・`color`・`size_pt`・`underline`・`link` |
+| `Text(文字列)` | 通常の文字 | `bold`・`color`・`size_pt`・`underline`・`link`・`superscript` |
 | `Emphasis(文字列)` | 強調（既定は太字と強調色） | `Text` と同じ |
 | `Math(式)` | 数式 | `bold`・`color`・`size_pt`・`emphasis`（真なら強調色と太字） |
 
 断片の書式は、指定した項目だけが要素の書式より優先する。`link` は `https://`・`http://`・`mailto:` で始まる外部のリンク先で、slidekit はリンク先へ接続しない。
+`superscript=True` は上付き（脚注の番号など）で、PowerPoint の文字の基準線のずらし（`baseline="30000"`）を書く。PowerPoint は上付きの文字を 3 分の 2 の大きさで、文字サイズの 30 % 上に描き、計測も同じにする（PowerPoint 16.0.20527.20150 の PDF で確かめた）。数式の指数（`^{1}`）と違い、直前の式の一部とは読まれない。
 文章に改行 `\n` 以外の制御文字を含めるとエラーになる。
 
 `slidekit.markup.parse()` は、`$…$` を数式、`**…**` を強調として断片の列にする。要素を作る関数は文字列の記法を自動では解釈しないので、使うときは明示して呼ぶ。
@@ -446,6 +470,8 @@ show_master_shapes = false
 
 修正の途中は `build --draft` で互換画像を省くことができる。
 切り出す範囲は、数式の図形の矩形に、枠の外へはみ出した数式の描画（伸びた括弧の下端など）と枠線を加えた範囲である。矩形から 16 pt を超えるはみ出しは切り詰め、警告 `fallback_crop_clipped` で知らせる。
+同じページのほかの要素の描画は範囲に含めない。外接矩形がその要素の範囲とほぼ一致する塗り（矢印の全体、箱の塗りなど）と、線・矢印の線分の近くにあり数式の矩形の外へ出る塗り（別に描いた矢印の先端など）を、その要素の描画とみなす。
+それでも切り詰めたときは、超えた部分に範囲が掛かるほかの要素の識別子を警告の観測値 `nearby_elements` に示す。超えた描画がその要素のものなら、数式は欠けない。
 
 標準表示の確認は最終 PPTX と同じスライドの XML を変換した画像で行う。互換画像を付ける資料の生成は、互換画像だけを仮の画像にした最終形の PPTX を PowerPoint で 1 回変換し、
 その PDF を標準表示の確認に使い、同じ PDF から互換画像を切り出して最終 PPTX に差し替える。
@@ -467,28 +493,30 @@ show_master_shapes = false
 
 ### コマンドの一覧
 
-すべてのコマンドが `--json`（要約の代わりに結果の辞書を JSON で出す）と `--quiet`（進捗を出さない）を受け付ける。`slidekit --version` は版を示す。
+すべてのコマンドが `--json`（要約の代わりに結果の辞書を JSON で出す）、`--quiet`（進捗を出さない）、`--verbose`（許容した警告と生成の参考の一覧も要約に出す）を受け付ける。`slidekit --version` は版を示す。
 
 | コマンド | 引数 | 用途 |
 |---|---|---|
-| `slidekit layout` | `--project P`（必須）、`--slides SPEC` | 配置と記述規則だけを検査する。表示ソフトを使わず、ファイルを書かない |
+| `slidekit layout` | `--project P`（必須）、`--slides SPEC`、`--wraps` | 配置と記述規則だけを検査する。表示ソフトを使わず、ファイルを書かない。`--wraps` は自動で折り返した要素の行の文字列と幅を示す |
+| `slidekit measure` | `--project P`（必須）、文字列（複数可）、`--width PT\|content`、`--kind text\|box\|equation`、`--role`、`--size PT`、`--page-kind`、`--markup` | 文字列を資料の書式で計測し、折り返した行・枠の寸法・1 行に収める枠の幅を示す。要素を作らず、ファイルを書かない |
 | `slidekit doctor` | `--project P`（必須）、`--wait 秒` | 配置の検査に加え、出力先・実行環境・表示ソフトを事前に確かめる |
 | `slidekit build` | `--project P`（必須）、`--slides SPEC`、`--draft`、`--stop-on-error`・`--no-stop-on-error`、`--jobs N`、`--wait 秒`、`--keep-intermediate`、`--carry-from auto\|none\|latest\|RUN` | 新しい実行を生成する |
-| `slidekit check` | `--build RUN`（必須）、`--project P`、`--final` | 生成記録と成果物を検査する。`--final` は最終検査 |
+| `slidekit check` | `--build RUN`（既定 `latest`）、`--project P`、`--final` | 生成記録と成果物を検査する。`--final` は最終検査 |
 | `slidekit export` | `--build RUN`（必須）、`--project P` | 最終検査に通った完成物を固定パスへ反映する |
 | `slidekit clean` | `--project P`（必須）、`--before RUN`、`--keep N`、`--failed`、`--drafts`、`--apply`（条件を 1 つ以上） | 古い実行の削除候補を示し、`--apply` で削除する |
 | `slidekit review status` | `--build RUN`（既定 `latest`）、`--project P` | 残りの確認・未対応の警告と、次の操作を示す |
-| `slidekit review record` | `--build RUN`、`--project P`、`--kind K[,K]`、`--slides SPEC`、`--renderer powerpoint\|libreoffice\|all`、`--variant standard\|fallback\|all`、`--status-id ID`、`--reviewer`、`--note` | 画像や本文を開いて確かめた確認を記録する |
+| `slidekit review record` | `--build RUN`、`--project P`、`--kind K[,K]` か `--pending`、`--slides SPEC`、`--renderer powerpoint\|libreoffice\|all`、`--variant standard\|fallback\|all`、`--status-id ID`、`--reviewer`、`--note`、`--note-visual`・`--note-overview`・`--note-content` | 画像や本文を開いて確かめた確認を記録する。`--pending` は `review status` が示した未確認をまとめて記録する |
+| `slidekit review sheet` | `--build RUN`（既定 `latest`）、`--project P`、`--slides SPEC`（既定 `pending`）、`--variant standard\|fallback\|all`、`--compare`・`--no-compare` | ページの画像を、前の実行の画像と互換表示の画像と横に並べた比較画像を作る。前の実行と差のある領域を枠で示す。確認の記録はしない |
 | `slidekit review accept` | `--build RUN`、`--project P`、`--diagnostic ID[,ID]` か `--code CODE`（`--slides SPEC`・`--element ID` で絞る）、`--reviewer`、`--reason` | 警告を理由付きで許容する |
 | `slidekit review revoke` | `--build RUN`、`--project P`、`--record ID[,ID]`、`--reviewer`、`--reason` | 確認か許容の記録を取り消す |
 | `slidekit review carry` | `--from auto\|RUN`、`--to RUN\|latest`、`--project P` | 前の実行の確認と許容を手で引き継ぐ |
-| `slidekit renderer status` | `--project P`（任意）、`--renderer powerpoint\|libreoffice` | 表示ソフトの排他・残存記録・使用中の処理を示す |
-| `slidekit renderer clear` | `--project P`（任意）、`--renderer powerpoint\|libreoffice`、`--force` | 安全を確かめてから残存記録を解除する |
+| `slidekit renderer status` | `--project P`（任意）、`--renderer powerpoint\|libreoffice` | 表示ソフトの排他・残存記録・使用中の処理と、PowerPoint の処理（slidekit が起動したものか）を示す |
+| `slidekit renderer clear` | `--project P`（任意）、`--renderer powerpoint\|libreoffice`、`--force`、`--stop-owned` | 安全を確かめてから残存記録を解除する。`--stop-owned` は slidekit が起動した PowerPoint だけを終了してから解除する |
 
 - `P` は `deck.toml` かそのディレクトリである。
 - `RUN` は実行ディレクトリのパス、番号（`12`・`0012`）、`latest`（完成物にできる最新の実行）である。番号と `latest` は `--project`（省くとカレントディレクトリの `deck.toml`）の実行保存先から探す。
   `review record`・`accept`・`revoke` は `latest` を受け付けない（画像を見た後に別の生成があると、見ていない実行に記録してしまうため）。
-- `SPEC` はページ番号（`3`）、範囲（`5-7`）、識別子（`intro`）、`id:識別子` のカンマ区切りである。番号は資料の元のページ番号で、数字だけの識別子は `id:2024` と書く。
+- `SPEC` はページ番号（`3`）、範囲（`5-7`）、識別子（`intro`）、`id:識別子` のカンマ区切りである。空白で区切って並べてもよい（`--slides 3 5-7` は `--slides 3,5-7` と同じ）。番号は資料の元のページ番号で、数字だけの識別子は `id:2024` と書く。
   確認の記録では `all` と `pending` も使うことができる。`all`・`pending` と同じ名前の識別子も `id:` を付けて書く。カンマを含む識別子は指定できない。
 - `renderer` の `--project` を省くと、共通の実行環境だけを読む。
 
@@ -501,10 +529,14 @@ show_master_shapes = false
 資料: examples/proposal/src/deck.toml（4 ページ、互換画像あり）
 所要時間: … 秒（配置の検査 …、構築 …、その他 …）
 次の操作: slidekit build --draft --project examples/proposal/src/deck.toml
+結果: 合格（エラー 0、終了コード 0）
 ```
 
 - 進捗（`[  12.3 秒] 構築` の形の行）、資料のコードの `print`、トレースバックは標準エラーへ出す。`--quiet` は進捗だけを止める。
 - 要約は、状態、診断の件数と主な診断、所要時間の内訳（段階をまとめた時間の長いものから 4 つまでと、残りの「その他」）、次の操作を示す。`build` は実行ディレクトリと確認の引き継ぎの結果も示す。
+- どのコマンドも、最後の行を「結果: 合格（エラー 0、終了コード 0）」の形の合否の行にする。残りのエラー・未完了の確認・未対応の警告の件数と終了コードを示すので、末尾の 1 行だけで結果が分かる。
+- 宣言か記録で許容した警告と、`build` の参考の診断は、既定では件数だけを示す（「宣言で許容した警告 3 件（一覧は --verbose）」）。一覧は `--verbose` で出す。新しく出た警告が許容済みの警告に埋もれない。
+- 「次の操作」のコマンドは、起動した方法に合わせて書く。`python -m slidekit` で起動したときはその Python の絶対パスと `-m slidekit`、PATH にない `slidekit` を絶対パスで起動したときはそのパスにする。
 - 終了コードは、成功が `0`、品質上の未解決事項（エラーの診断、未確認、未対応の警告）が `1`、入力・環境・変換の失敗と中断が `2` である。
 - `build` の結果と生成記録の `status` は、`built`（生成した。エラーの診断があってもよい）、`stopped`（`--stop-on-error` で変換の前に止めた）、`failed`（例外で止まった）である。品質は `counts`（重大度ごとの件数）と終了コードで示す。
 - 説明のための例外（確認記録の操作の拒否、入力と設定の誤り）は、トレースバックを出さずに文言だけを示す。設定の問題は 1 件 1 行で出す。それ以外の例外はトレースバックを標準エラーへ出す（`--quiet` のときも）。
@@ -515,7 +547,21 @@ show_master_shapes = false
 
 `slidekit layout --project deck.toml` は、構築・素材の準備（一時フォルダー）・配置と記述規則の検査だけを行う。表示ソフトを使わず、資料のディレクトリと実行保存先に何も書かない。
 別の変換の実行中でも、何人でも同時に動かすことができる。`--slides` を付けると、検査と報告を選んだページに限る。
-`--json` の結果の `layout` には `layout.json` と同じ形の予測（要素ごとの行と寸法）が入る。
+`--json` の結果の `layout` には `layout.json` と同じ形の予測（要素ごとの行と寸法）が入る。各行の `wrap` は行末の自動の折り返しの種類（`space`・`math`・`punctuation`・`phrase`・`mid_phrase`・`hyphen`・`split`・`other`。明示改行で終わる行と最後の行は `null`）である。
+`--wraps` を付けると、要約に自動で折り返した要素の行の文字列と幅を出し、文節の途中・ハイフンの後・語の途中の折り返しに印を付ける。画像を開く前に、折り返しの位置を文字で確かめることができる。
+
+```text
+自動で折り返した要素:
+  p.3 lead（内側の幅 600.0 pt）
+    「通知が届いたた」 590.0 pt ← 文節の途中
+    「め、次の処理へ進む」 210.0 pt
+```
+
+折り返しの位置について、次の参考の診断を出す（どれも許容は要らない）。
+
+- `text_short_line`：自動で折り返した段落の最後の行が、2 文字以下か内側の幅の 2 割未満である。
+- `text_wrap_mid_phrase`：和文の文節の途中で折り返している。文節の境は BudouX の日本語のモデルで判定する。
+- `text_wrap_hyphen`：欧文の語のハイフンの後で折り返している（`time-` / `fusible` のような折り返し）。
 
 ### 一部のページと下書きの生成
 
@@ -630,6 +676,9 @@ slidekit export --project examples/proposal/src/deck.toml --build latest
 - `--slides` は `visual` と `content` で必須である。`all` は、その確認が要る全ページを選ぶ（互換表示では数式のあるページ）。明示したページにその確認が要らなければエラーになる。
 - `--variant` は `standard`（既定）・`fallback`（互換表示）・`all`、`--renderer` は表示ソフトか `all` である（既定は主表示ソフト）。
 - 未確認のページだけを記録するときは、`review status --json` が示す照合用の値を使い `--slides pending --status-id …` と書く。
+- 画像と本文をすべて見た後は、`review record --build N --pending --status-id … --reviewer … --note …` で、`review status` が示した未確認の確認（表示・一覧画像・内容のすべての組）を 1 回で記録できる。照合用の値は `review status` の結果の `status_id`（要約の「次の操作」の先頭のコマンドにも出る）で、その後に未確認の対象が変わっていれば記録しない。種類ごとに確認内容を分けるときは `--note-visual`・`--note-overview`・`--note-content` を使う（`--note` より優先する）。
+- 記録の結果は、残っている確認と未対応の警告の件数（`remaining`）を示す。残りがなければ次の操作は `export` になる。
+- `review sheet --build N` は、表示の確認が未完了のページ（`--slides` で替える）の画像を、前の実行の画像・互換表示の画像と横に並べた比較画像を、実行ディレクトリの `sheets/` に作る。前の実行と差のある領域を今の画像に赤い枠で示す（ページ番号の領域は除いて比べる）。比較画像は確認を助ける表示で、見たことを確認の記録としない。ページ画像を開いて確かめてから記録する。
 - `review status` が示す記録と許容のコマンドは、確認者・確認内容・理由を `<確認者>`・`<確認した内容>`・`<理由>` の置き場所で示す。画像を見て書き換えてから実行する。置き場所のままの値と、全体を `< >` で囲んだ値では、記録も許容もしない。
 - 1 回のコマンドで作った記録には同じ `batch`（`b_…`）が付く。
 - 確認の途中で入力を直しても、その実行に記録できる（要約が知らせる）。その実行は反映できないが、再生成した後に変わっていないページの記録が引き継がれる。
@@ -644,13 +693,14 @@ slidekit export --project examples/proposal/src/deck.toml --build latest
 | ノート・出典だけの変更（ページに表示しない内容） | そのページだけやり直す | 引き継ぐ | 関係する警告をやり直す |
 | 配置・書式だけの変更 | 引き継ぐ | そのページだけやり直す | 関係する警告をやり直す |
 | ページ番号だけの変更（桁数が同じ） | 引き継ぐ | 引き継ぐ（番号の領域を除いて画像を比べる） | 引き継ぐ（ページ番号の要素の警告を除く） |
-| ページ番号の桁数が変わる変更（9 から 10 など） | 引き継ぐ | そのページだけやり直す | そのページの PDF の警告と、ページ番号の要素の警告をやり直す |
+| ページ番号の桁数・書式・枠の位置と大きさが変わる変更（9 から 10、`page_number_format`、`footer_area_pt` など） | 引き継ぐ | 引き継ぐ（番号の図形を除いた証拠が一致し、変更前と後の番号の領域を除いた画像が一致するとき） | そのページの PDF の警告と、ページ番号の要素の警告をやり直す |
 | 参照する元資料・文献項目の変更 | 参照するページだけやり直す | 引き継ぐ | — |
 | 文書情報・依頼内容・ページ順の変更 | 引き継ぐ（一覧画像の確認で扱う） | 引き継ぐ | — |
 | 記述規則の変更 | 引き継ぐ | 引き継ぐ | その規則を使う警告だけやり直す |
 | フォント・表示ソフト・画像化の変更 | 引き継ぐ | 全ページやり直す | 計測に使う警告をやり直す |
 
 表示の確認の証拠はページの PPTX の部品（ノートを含まない）と表示環境である。部品のページ番号の数字は 0 に置き換えて比べるので、桁数が同じ番号の変化では証拠が変わらず、桁数が変わると変わる。
+生成記録には、ページ番号の図形を除いた証拠（`visuals` の `body_hash`）も記録する。証拠が違っても、これが一致するページは、変更前と後の番号の領域を除いて画像を比べ、差がなければ「ページ番号だけ変わったページ」として表示の確認を引き継ぐ（写しの `render_check` に `footer_only` と元の記録の証拠を残す）。
 ただし、ページか雛形に表示されるフィールド（`a:fld`。雛形のページ番号や日付）があるページは、資料の中の位置（日付のフィールドなら生成した日も）を証拠に入れるので、位置が変わると表示の確認をやり直す。
 内容の確認の証拠は題名・文字・数式・ノート・出典・図の構造と、参照する元資料・文献項目である（座標・書式・ページ番号は入れない）。
 一覧画像の確認は毎回行う（引き継がない）。表示の確認を引き継ぐときは、元の記録の画像と新しい画像を 1 画素のずれを許して比べ、大きな差があれば引き継がない。
@@ -659,8 +709,11 @@ slidekit export --project examples/proposal/src/deck.toml --build latest
 - `build --carry-from` が受け付ける引き継ぎ元は、`auto`（既定。同じ実行保存先の前の実行から、新しい順に探す）、`none`（引き継がない）、`latest`（生成の前の、完成物にできる最新の実行）、実行の番号かパスである。
   それ以外の書式は生成の前に引数の誤りになる。完成物にできる実行がないときと、存在しない番号を指定したときは、生成は行い、引き継ぎの失敗として示す。
   引き継ぎに失敗しても生成は失敗にせず、終了コードも変わらない。
-- 要約の「確認の引き継ぎ」の行は、件数、ページ番号だけ変わったページの数（数式のページの標準表示と互換表示の 2 つの確認も 1 ページとして集計する）、候補にしなかった実行（古い形式の実行など）を示す。
-  `--json` の結果の `carry` は `status`・`mode`・`count`・`sources`・`renumbered`・`skipped`・`skipped_runs`・`remaining`・`notices` を持ち、`review.json` の `carry_attempts` にも残る。
+- 要約の「確認の引き継ぎ」の行は、件数、引き継ぎ元の実行、ページ番号だけ変わったページの数と比べた実行（数式のページの標準表示と互換表示の 2 つの確認も 1 ページとして集計する）、候補にしなかった実行（古い形式の実行など）を示す。
+  続く行に、引き継がなかった確認の理由（表示は「ページの表示の変更」「表示環境の変更」、内容は「本文の変更」「元資料の変更（元資料の識別子）」「文献項目の変更」、どちらも「前の確認の記録がない」）と、確認の記録がある最も新しい実行との表示環境の違い（表示ソフト・パッケージ・Python・フォント・計測の版）を示す。
+  `review status` の未確認のページにも、理由ごとのページを添える（例：「内容 3,5-7（4 ページ。本文の変更 p.3,5、元資料の変更 p.6-7（proofs））」）。
+  `--json` の結果の `carry` は `status`・`mode`・`count`・`sources`・`renumbered`・`renumbered_from`・`skipped`・`skipped_runs`・`remaining`・`pending_reasons`・`compared_run`・`environment_changes`・`notices` を持ち、`review.json` の `carry_attempts` にも残る。
+- `build` の要約は、前の完了した実行（下書きと部分生成を含む）とページ画像を比べた結果も示す（例：「前の実行 0133 との比較: 変更なし 34、ページ番号だけ変わった 1、変わった 1（p.14）」）。`--json` の結果では `comparison`。
 - `review carry --from auto --to latest` で手で引き継ぐことができる。2 回実行しても重複して写さない。
 - 資料のディレクトリを実行保存先ごと移しても（何度移しても）、同じ実行保存先の実行どうしは同じ資料として扱い、確認を引き継ぐことができる。反映した実行と退避した旧版も、整理で保護され続ける（古い形式の反映の履歴は絶対パスなので、移した後は保護の理由にならない）。
   `runs/` の外へ複製した実行には記録・許容・取り消し・引き継ぎができない（検査と `review status` はできる）。
@@ -680,8 +733,8 @@ slidekit export --project examples/proposal/src/deck.toml --build latest
 - 資料コードで宣言する：`slide.allow_warning("element_overlap", element=label, related=figure, reason="図の上にラベルを重ねる")`。
   2 つの要素の組の警告（`element_overlap` など）では `element` が必須で、`related` は組の相手である。それ以外の警告で `element` を省くと、そのページの同じ種類の警告すべてが対象になる。
   宣言した警告は確認記録なしで最終検査を通る。対応する警告がない宣言は、参考の診断 `allow_warning_unused` になる。宣言しても、そのページの表示確認は要る。
-  宣言で許容した警告は、`review status` と `check --final` の要約に「宣言で許容した警告」として、ページ・種類・要素・理由・宣言の場所とともに並ぶ（`--json` の結果では `declared_warnings`）。
-  `layout`・`doctor`・`build` の要約では、警告の件数に「うち宣言で許容 N 件」を添え、その警告の行の末尾に「（宣言で許容）」を付ける（`--json` の診断では `declared`）。
+  宣言で許容した警告は、`review status` と `check --final` の要約に「宣言で許容した警告」として件数を示し、`--verbose` を付けるとページ・種類・要素・理由・宣言の場所とともに並べる（`--json` の結果では `declared_warnings`）。
+  `layout`・`doctor`・`build` の要約では、警告の件数に「うち宣言で許容 N 件」を添える。`--verbose` を付けると、その警告の行を並べて末尾に「（宣言で許容）」を付ける（`--json` の診断では `declared`）。
 - 生成の後に記録する：`slidekit review accept --build 1 --code element_overlap --slides 3-5 --reviewer editor --reason "意図した重なりである"`、または `--diagnostic` に診断の識別子を書く。
 
 許容は警告の根拠（`evidence_hash`）に結び付き、根拠が変わると失効する。`allow_warning` は、使う場所を限った役割の宣言 `allow_roles` とは別の機能である。
@@ -697,7 +750,10 @@ slidekit review revoke --build 1 --record r_0123456789abcdef --reviewer editor -
 `slidekit clean --project deck.toml` は、条件に当たる古い実行の削除候補を示し、`--apply` のときだけ削除する。候補の表示はロックを取らず、何も書かない。
 
 - 条件（1 つ以上）：`--before RUN`（実行の識別子。`0005` ならそれより前の実行）、`--keep N`（条件に当たる実行のうち新しい N 件を残す）、`--failed`（失敗・停止・中断した実行）、`--drafts`（下書きと部分生成）。
-- 保護する実行：採用中の実行、完成物として反映した実行と退避した旧版、反映が未完了の実行、確認記録の引き継ぎ元、実行中の実行と実行中か判定できない実行、生成記録も生成中の印もない実行。古い形式の実行の採用記録・反映の履歴・引き継ぎ元も保護する。
+- 保護する実行：採用中の実行、完成物として反映した実行と退避した旧版、反映が未完了の実行、確認記録の引き継ぎ元、実行中の実行と実行中か判定できない実行、生成記録も生成中の印もない実行、別資料の実行と所属を確認できない実行。古い形式の実行の採用記録・反映の履歴・引き継ぎ元も保護する。
+- 資料を実行保存先ごと移した場合も、生成記録から実行保存先に対する資料の相対位置が同じと確認できれば整理の対象にする。生成中の印（`.building`）にも実行保存先を記録するので、生成記録ができる前に中断した実行も同じ相対位置で判定する。
+- 別の資料の実行は「別の資料の実行（資料: …）」、資料か実行保存先の記録がない実行（古い形式の印など）は「現在の資料の実行と確認できない（記録に資料か実行保存先がない）」と示して残す。
+- `--json` の `protected` の各項目は、`run`・`run_id`・`reasons`（文言）・`reason_codes`（`adopted`・`exported`・`previous_export`・`export_pending`・`export_recovery`・`running`・`running_unknown`・`unreadable`・`no_record`・`unfinished`・`other_project`・`unknown_project`・`carry_source`）・`details` を持つ。`details` の別資料の項目は、記録された資料の場所（`recorded_project`）と、実行保存先から見た資料の位置（`recorded_place`・`current_place`）を持つ。
 - 要約で、生成記録のない実行（中断した生成）は「生成記録なし」と示す。
 
 ## 機械検査
@@ -759,6 +815,10 @@ slidekit が起動した PowerPoint は、最後の変換の後に終了を待�
 開いた複製を閉じ、残存記録・使用中の記録・作業フォルダーを消し、自分で起動した PowerPoint を終了する。Python が先に終わっても後片付けは続き、終わるまで `renderer status` は使用中を示す。
 準備が完了する前の中断では、作業プロセスもその場で終わる。利用者の PowerPoint は強制終了しない。
 
+`build` は、生成の間に受けた SIGTERM と SIGHUP（端末を閉じたときなど）も Ctrl+C と同じ中断として扱う。差し替えるのは既定の処理のままの信号だけで、2 回目以降の信号は後片付けのために無視する。
+作業プロセスが後片付けの前に終わった場合（作業プロセスが強制終了された場合など）や、起動した PowerPoint を終了できなかった場合は、PowerPoint と記録が残る。
+`renderer status` で確かめ、`renderer clear --stop-owned` で解除する（次の節）。
+
 ### 残存記録の確認と解除
 
 後片付けができずに残った記録（残存記録 `pending.json`）がある間は、新しい変換を始めない（`renderer_pending`）。
@@ -766,13 +826,24 @@ slidekit が起動した PowerPoint は、最後の変換の後に終了を待�
 ```sh
 slidekit renderer status
 slidekit renderer clear
+slidekit renderer clear --stop-owned
 ```
 
 - `renderer status` は、排他（`idle`・`busy`・`pending`）、残存記録、その作業プロセスが動いているか、検査用の複製を排他で開くことができないか、PowerPoint が起動しているかを示す。
   `abandoned` は、排他を持っていた処理が放さずに終わっていたことを示す（この確認で取って放すので、後には残らない。slidekit が起動した PowerPoint が残っていることがある）。
+- `renderer status` は、PowerPoint の処理ごとに、PID・ウィンドウの題名・開始時刻と、slidekit が起動した PowerPoint の記録と一致するかを示す。
+  作業プロセスは PowerPoint を起動すると、その PID と開始時刻を残存記録と使用中の記録の `powerpoint` に書く。PID と開始時刻の両方が一致した処理だけを、slidekit が起動したものとみなす。
+  `--json` では `powerpoint_processes`（`pid`・`window_title`・`has_window`・`started_at`・`owned`・`record`・`stoppable`）と、`powerpoint_records`（記録と、その処理が動いているか `running`）に入る。
 - `renderer clear` は、排他を取得したうえで、作業プロセスが動いておらず、検査用の複製を排他で開くことに成功したときに、残存記録を `cleared/` へ移し、作業フォルダーを消す。24 時間より古く、どの記録も指していない作業フォルダーも消す。
 - PowerPoint は読み取り専用で開いた複製のファイルを開いたままにしないので、複製を排他で開くことができても、PowerPoint が複製を開いていないとは断定できない。
   PowerPoint が起動しているときは、PowerPoint の終了を待つか、PowerPoint が検査用の複製を開いていないことを確かめてから `renderer clear --force` を実行する。
+  残存記録の変換に使った PowerPoint が slidekit の起動したものと記録されていて、もう動いていなければ、ほかの PowerPoint が起動していても `--force` は要らない。
+- `renderer clear --stop-owned` は、作業プロセスが動いていないことを確かめた後、slidekit が起動したと記録で確かめることができ、ウィンドウのない PowerPoint だけを強制終了してから解除する。
+  記録と一致してもウィンドウがある PowerPoint は、利用者が資料を開いていることがあるので、終了せずに断る。ほかの PowerPoint は終了しない。終了した PowerPoint は結果の `stopped_powerpoint` に入る。
+  残存記録がなくても、前の処理が終了させずに残した PowerPoint（使用中の記録と一致するもの）は終了する。
+- 記録がない場合（古い形式の記録か、PowerPoint を起動する前に止まった記録）と、既に起動していた PowerPoint を変換に使った場合は、`--stop-owned` でも終了せず、理由を示して断る。
+  `renderer status` で PowerPoint の一覧を確かめ、PowerPoint の終了を待つか、複製を開いていないことを確かめてから `--force` を使う。
+- 前の処理が終了させずに残した PowerPoint だけが動いていて、ウィンドウがなければ、次の生成はそれを引き継いで使い、最後に資料がなければ終了する。
 
 ### Python のスクリプトから呼ぶとき
 
@@ -837,6 +908,7 @@ black --check src tests examples tools
 - `requirements-lock.txt` は、全追加依存を検証した組み合わせである。そろえるときは `uv pip install -r requirements-lock.txt` の後に `uv pip install --no-deps -e .` を実行する。
   作り直すときは、ファイルの先頭の注記にある `uv pip compile` のコマンドを使う。作り直すと先頭の注記が消えるので、書き戻す（`tests/test_packaging.py` が注記と依存の固定を確かめる）。
 - PDF の読み取りと画像化は pypdfium2（PDFium）・pypdf・fontTools で行う（`slidekit.pdf`）。試験の PDF は reportlab で作る。
+- 和文の文節の境（`text_wrap_mid_phrase` と書式 `phrase_wrap`）は BudouX（Apache-2.0、依存なしの Python のパッケージ）の日本語のモデルで判定する。読み込むことができない環境では、文節の判定だけを省く。
 - 必須の依存のライセンスは MIT・BSD・Apache-2.0 などである。追加依存 `svg` の CairoSVG は LGPL-3.0 以降で提供される。PowerPoint 本体とフォントは同梱しない。
 
 ### 照合データの作り直し
@@ -844,9 +916,41 @@ black --check src tests examples tools
 計測を PowerPoint の表示と照合する試験は、PowerPoint で変換した PDF から計測した照合データを使う。照合データと手元のフォントのファイルが違う環境では省略する。
 PowerPoint・フォント・計測の版を変えたとき（`measure.MEASURE_VERSION` か数式の計測の版を上げたとき）に作り直し、差を確かめてから入れ替える。PowerPoint を使う作成は一度に 1 つだけ行う。
 
-- 文字の照合データ `tests/data/layout/powerpoint_layout.json`（`MEASURE_VERSION` 7、校正用の資料の 19 ページ・318 要素）：校正用の資料 `tests/data/layout/deck/` を継承する `deck.toml` を作業用の場所に置いて `slidekit build` し、
+- 文字の照合データ `tests/data/layout/powerpoint_layout.json`（`MEASURE_VERSION` 9、PowerPoint 16.0.20527.20150、校正用の資料の 23 ページ・382 要素）：校正用の資料 `tests/data/layout/deck/` を継承する `deck.toml` を作業用の場所に置いて `slidekit build` し、
   `python tools/make_layout_fixture.py --run 実行ディレクトリ --output tests/data/layout/powerpoint_layout.json` で作る。試験は `tests/test_layout_fixture.py`（環境変数 `SLIDEKIT_LAYOUT_FIXTURE` で照合データを替えることができる）。
-- 数式の照合データ `tests/data/powerpoint_math.json`（道具の式の一覧の先頭の 140 式を文中と独立で置いた 280 件）：`python tests/tools/powerpoint_math_data.py --output … --work …` で作り、`python -m slidekit.math.metrics` で計測と比べる（[照合データと誤差](math.md#照合データと誤差)）。
+- 数式の照合データ `tests/data/powerpoint_math.json`（道具の 166 式を文中と独立で置いた 332 件）：`python tests/tools/powerpoint_math_data.py --output … --work …` で作り、`python -m slidekit.math.metrics` で計測と比べる（[照合データと誤差](math.md#照合データと誤差)）。
+
+開発用の共通の入口 `tools/calibrate.py` は、設定ファイル（TOML）から照合用の資料を作り、`slidekit build` で変換して計測し、今の計測と既存の照合データとの差を示す。
+設定の `deck` は、`cases`（式・文字サイズ・行間・文中か独立か・揃え・前後の文字の組み合わせ）、`layout`（校正用の資料）、`math`（数式の道具の式の一覧。`expressions` で絞ることができる）のどれかにする。
+
+```toml
+schema_version = 1
+deck = "cases"
+
+[defaults]
+line_spacing = [1.0, 1.2]
+
+[[cases]]
+name = "script"
+expressions = ["m^{1/4}", 'x^{\frac{a}{b}}']
+size_pt = [12, 20, 32]
+tags = ["text_baseline"]
+```
+
+```sh
+python tools/calibrate.py run 設定.toml --work 作業ディレクトリ          # 資料を作り、変換して比べる
+python tools/calibrate.py run --work 作業ディレクトリ --measure-only     # 変換せず、保存した PDF を計測し直す
+python tools/calibrate.py adopt --work 作業ディレクトリ [--only 項目 …]  # 計測値を tests/data の照合データに採用する
+```
+
+作業ディレクトリは slidekit の外の新しいディレクトリにする。設定の写し、生成条件 `conditions.json`、実行 `out/runs/`（PDF と生成記録）、計測の結果 `results/実行番号/` が残る。
+`run` の終了コードは、今の計測が許容差に入れば 0、違いがあれば 1、照合できなければ 2 である。
+採用は `layout` と `math` の資料だけで行う。`cases` の要素は、校正用の資料か数式の道具の式の一覧に加えてから作り直す。`--only` は、計測の環境が照合データと同じときに既存の項目だけを置き換える。
+
+`tools/layout_overlay.py` は、実行の標準表示の PDF の画像に、要素の予測（`layout.json`。`--remeasure` では今の計測）と PDF から読んだ基線・行の範囲・インクを重ね、差を pt と em で示す。
+`python tools/layout_overlay.py --run 実行ディレクトリ --element ページ/要素 --output 出力先` のように使い、`--run` と `--element` は複数指定できる。配置を直すときの補助であり、表示確認の記録には使わない。
+
+照合ケースごとに厳しく比べる項目と許容差は `tests/data/layout/tolerances.toml` に書く。規則はタグか要素で選び、基線（`baseline`）・行の幅と左端（`width`）・インクの左右（`ink_x`）・インクの上下（`ink_y`）の許容差を `tolerance_pt` か `tolerance_em` で決め、根拠を `reason` に書く。
 
 照合データと校正用の資料は公開してよい内容の試験の対象になる。ローカルのパスや非公開の語を入れない（`tools/make_layout_fixture.py` はパスに見える文字列があれば書かずに止まる）。
 

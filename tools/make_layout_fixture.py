@@ -18,6 +18,8 @@
   python tools/make_layout_fixture.py --run WORK/out/runs/NNNN --output tests/data/layout/powerpoint_layout.json
 
 作り直す時期：PowerPoint・フォント・数式の計測の版を変えたとき、measure.MEASURE_VERSION を上げたとき。差分を確かめてから入れ替える。
+共通の入口 tools/calibrate.py（設定ファイルの deck = "layout"）は、この手順と既存の照合データとの比較を続けて行い、
+採用（adopt）を別の手順にする。
 """
 
 from __future__ import annotations

@@ -65,8 +65,8 @@ def test_text_is_normal_text_with_text_fonts():
     assert properties.find("a:ea", NS).get("typeface") == "Yu Gothic UI"
     assert properties.find("a:latin", NS).get("typeface") == "Arial"
     assert properties.get("lang") == "ja-JP" and properties.get("i") == "0"
-    # 中身は置き換えない（ハイフンを負号にしない）。空白も保つ。
-    assert run.find("m:t", NS).text == "日本語 well-known"
+    # ハイフンは U+2010 にする（PowerPoint は数式の中の - を文章でもマイナス記号で描く）。ほかの文字と空白は保つ。
+    assert run.find("m:t", NS).text == "日本語 well\u2010known"
     plain = omath(r"\text{sample text}", font="Test Math").find("m:r", NS)
     assert plain.find("m:t", NS).text == "sample text"
     assert plain.find("a:rPr", NS).get("lang") == "en-US"
@@ -629,3 +629,16 @@ def test_large_operator_operand_extends_to_next_operator():
     assert [type(node) for node in parse(r"\sum_i a_i/b")[0].body] == [Fraction]
     with pytest.raises(MathSyntaxError, match="引数のない数式"):
         parse(r"\sum_i")
+
+
+def test_hyphen_in_text_becomes_u2010_everywhere():
+    """\\text の中の - は、構文解析でハイフン（U+2010）にし、書き出し・計測・PDF の検査が同じ文字を使う。"""
+    from slidekit.math import syntax
+    from slidekit.pdf_layout import _text_in_math
+
+    (node,) = [item for item in syntax.parse(r"\mathrm{delete}\text{-}\mathrm{min}") if isinstance(item, syntax.Text)]
+    assert node.text == syntax.TEXT_HYPHEN == "‐"
+    assert _text_in_math(r"\mathrm{delete}\text{-}\mathrm{min}()") == "‐"
+    # 数式の - は従来どおりマイナス記号として書き出す。
+    run = omath("a-b").findall("m:r", NS)
+    assert [item.find("m:t", NS).text for item in run] == ["a", "−", "b"]

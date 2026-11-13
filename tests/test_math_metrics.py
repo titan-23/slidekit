@@ -460,6 +460,10 @@ def test_text_size_matches_written_size(measurer):
         (r"x^{y_{\text{A}}} \text{B}", 20, False),
         (r"\frac{\text{a}}{b}", 20, False),
         (r"\frac{\text{a}}{\text{b}}", 20, True),
+        (r"\frac{\text{a}}{\frac{\text{b}}{c}}", 20, True),
+        (r"\frac{\frac{\text{a}}{b}}{\text{c}}", 20, True),
+        (r"\frac{\text{a}}{\frac{\text{b}}{c}}", 20, False),
+        (r"x^{\frac{\text{a}}{\frac{\text{b}}{c}}}", 20, True),
         (r"\sqrt[\text{n}]{\text{x}}", 20, False),
         (r"\sum_{\text{a}}^{\text{b}} \text{c}", 18, True),
         (r"x_{\text{A}}", 11, False),
@@ -474,11 +478,6 @@ def test_text_size_matches_written_size(measurer):
             expression,
             display,
         )
-    # 残る差：独立した数式の入れ子の分数の中は、書き出しは縮めない（PowerPoint は縮めない）が、計測では 1 段縮める
-    sizes.clear()
-    measurer.measure(r"\frac{\text{a}}{\frac{\text{b}}{c}}", 20, display=True, text_fonts=fonts)
-    assert sizes == [20.0, 14.6]
-    assert written_text_sizes(r"\frac{\text{a}}{\frac{\text{b}}{c}}", 20, True, measurer.family) == [20.0, 20.0]
 
 
 def test_missing_glyph_is_reported(measurer):
@@ -861,8 +860,9 @@ def test_radical_excess_goes_above(measurer, monkeypatch):
 
 
 def test_delimiter_factor_selects_shorter_variants(measurer, monkeypatch):
-    """伸びる括弧は中身の軸からの上下の 2 倍に 0.901 を掛けた長さ以上の最初の候補にする（TeX の \\delimiterfactor）。"""
+    """短差の上限を外し、TeX の \\delimiterfactor による候補の選択を確かめる。"""
     assert metrics.OFFICE["delimiter_factor"] == 0.901
+    monkeypatch.setitem(metrics.OFFICE, "delimiter_shortfall_em", 100.0)
     expressions = [
         r"\binom{n}{k}",
         r"\left(\frac{a}{b}\right)",

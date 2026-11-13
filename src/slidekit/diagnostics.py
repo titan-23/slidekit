@@ -408,6 +408,33 @@ DIAGNOSTICS: Mapping[str, DiagnosticSpec] = _registry(
             ),
         ),
         (
+            "text_short_line",
+            DiagnosticSpec(
+                "info",
+                "layout",
+                "自動で折り返した段落の最後の行が、2 文字以下か内側の幅の 2 割未満である",
+                "改行を明示するか、幅か文言を変えて行の長さをそろえる。行の文字列は `slidekit layout --wraps` で見る",
+            ),
+        ),
+        (
+            "text_wrap_mid_phrase",
+            DiagnosticSpec(
+                "info",
+                "layout",
+                "和文の文節の途中（BudouX の日本語のモデルで判定した文節の境以外）で、自動で折り返している",
+                "文節の境に改行を明示するか、幅か文言を変える。意図した折り返しなら対応は要らない",
+            ),
+        ),
+        (
+            "text_wrap_hyphen",
+            DiagnosticSpec(
+                "info",
+                "layout",
+                "欧文の語のハイフンの後で、自動で折り返している（PowerPoint はハイフンの後で改行する）",
+                "語の前で改行を明示するか、幅を広げる",
+            ),
+        ),
+        (
             "text_occluded",
             DiagnosticSpec(
                 "error",
@@ -611,8 +638,10 @@ DIAGNOSTICS: Mapping[str, DiagnosticSpec] = _registry(
             DiagnosticSpec(
                 "warning",
                 "pptx",
-                "数式の描画が、互換画像に切り出す範囲の上限（数式の図形の矩形から 16 pt まで。ページの内側）を超えている。互換表示では超えた分が欠ける",
-                "文字枠を広げる。互換表示で欠けていなければ許容する",
+                "数式の描画が、互換画像に切り出す範囲の上限（数式の図形の矩形から 16 pt まで。ページの内側）を超えている。互換表示では超えた分が欠ける。"
+                "ほかの要素の描画（線・矢印・箱の塗り）とみなせるものは範囲に含めない",
+                "文字枠を広げる。互換表示で欠けていなければ許容する。観測値 `nearby_elements` は、超えた部分に範囲が掛かる"
+                "ほかの要素である。超えた描画がその要素のものなら、数式は欠けない",
                 EvidenceScope(rules=(), fonts=False, element="all", page=()),
             ),
         ),

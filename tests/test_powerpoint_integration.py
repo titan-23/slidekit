@@ -298,16 +298,18 @@ import json
 from pathlib import Path
 import sys
 
-from slidekit import renderers
+from slidekit import pipeline, renderers
 
 source, target, state, mode = sys.argv[1:5]
 environment = {'fonts': {}, 'renderers': {'powerpoint': {'timeout': 1 if mode == 'timeout' else 300}}}
 sessions = []
 result = {'code': None}
 try:
-    with renderers.open_session('powerpoint', environment, state_dir=Path(state)) as session:
-        sessions.append(session)
-        session.render(Path(source), Path(target))
+    # 生成と同じく、SIGTERM と SIGHUP を中断として扱う。
+    with pipeline._signals_as_interrupt():
+        with renderers.open_session('powerpoint', environment, state_dir=Path(state)) as session:
+            sessions.append(session)
+            session.render(Path(source), Path(target))
 except renderers.RendererError as error:
     result['code'] = error.code
 except KeyboardInterrupt:
@@ -335,10 +337,11 @@ def make_long_pptx(path, count):
     return path
 
 
-@pytest.mark.parametrize("mode", ["timeout", "interrupt"])
+@pytest.mark.parametrize("mode", ["timeout", "interrupt", "terminate"])
 def test_real_detached_worker_cleans_up_after_python_exits(tmp_path, mode):
-    # 時間切れと端末の Ctrl+C（処理グループ全体への SIGINT）の後に Python が終わっても、切り離した作業プロセスは
+    # 時間切れと端末の Ctrl+C（処理グループ全体への SIGINT）と SIGTERM の後に Python が終わっても、切り離した作業プロセスは
     # 変換を終えて残存記録・使用中の記録・作業フォルダーを消し、自分で起動した PowerPoint を終了する。
+    # 作業プロセスが変換している間は、その PowerPoint を slidekit が起動したもの（記録と PID・開始時刻が一致）として示す。
     import signal
     import sys
 
@@ -359,7 +362,7 @@ def test_real_detached_worker_cleans_up_after_python_exits(tmp_path, mode):
             env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
         )
         try:
-            if mode == "interrupt":
+            if mode in ("interrupt", "terminate"):
                 # 作業プロセスが変換を始めた（残存記録を running で書いた）後に送る。
                 deadline = time.monotonic() + 120
                 while time.monotonic() < deadline and child.poll() is None:
@@ -368,7 +371,10 @@ def test_real_detached_worker_cleans_up_after_python_exits(tmp_path, mode):
                             break
                     time.sleep(0.1)
                 time.sleep(0.5)
-                os.killpg(child.pid, signal.SIGINT)
+                if mode == "interrupt":
+                    os.killpg(child.pid, signal.SIGINT)
+                else:
+                    os.kill(child.pid, signal.SIGTERM)
             output, errors = child.communicate(timeout=180)
         finally:
             if child.poll() is None:
@@ -381,10 +387,15 @@ def test_real_detached_worker_cleans_up_after_python_exits(tmp_path, mode):
         assert (state / "pending.json").exists()
         deadline = time.monotonic() + 120
         status = renderers.renderer_status("powerpoint", environment, state_dir=state)
+        owned = []
         while status["status"] != "idle" and time.monotonic() < deadline:
+            owned += [item for item in status["powerpoint_processes"] if item["owned"]]
             time.sleep(1)
             status = renderers.renderer_status("powerpoint", environment, state_dir=state)
         assert status["status"] == "idle", status
+        if not running_before:
+            # 使用中の間は終了の対象にしない。
+            assert owned and all(not item["stoppable"] for item in owned), owned
         assert not (state / "pending.json").exists() and not (state / "active.json").exists()
         # 作業フォルダーは、排他を放した後に作業プロセスが消す。
         work = Path(result["work_dir"])
@@ -398,6 +409,52 @@ def test_real_detached_worker_cleans_up_after_python_exits(tmp_path, mode):
                 time.sleep(1)
                 status = renderers.renderer_status("powerpoint", environment)
             assert not status["powerpoint_running"]
+
+
+def test_real_stop_owned_stops_only_powerpoint_started_by_slidekit(tmp_path):
+    # 作業プロセスが後片付けの前に終わり、slidekit が起動した PowerPoint が残った状態を作り、--stop-owned でそれだけを終了する。
+    # 利用者の PowerPoint を終了しないよう、PowerPoint が起動していれば試験しない。
+    from slidekit.renderers.powerpoint import PowerPointSession
+
+    environment = {"fonts": {}}
+    if renderers.renderer_status("powerpoint", environment)["powerpoint_running"]:
+        pytest.skip("PowerPoint が起動しているので試験しない（利用者の資料を終了しないため）")
+    context = renderers.windows_context(environment)
+    powershell = renderers._executable("powershell.exe")
+    source = make_pptx(tmp_path / "input.pptx", "停止の確認")
+    with tempfile.TemporaryDirectory(
+        prefix="slidekit-owned-test-", dir=renderers._unix_path(context["temp"])
+    ) as folder:
+        state = Path(folder)
+        session = PowerPointSession(environment, state_dir=state)
+        session.start()
+        try:
+            session.render(source, tmp_path / "output.pdf")
+            # 後片付けの前に作業プロセスを終わらせる（PowerPoint は残る）。
+            subprocess.run(
+                renderers._powershell_command(
+                    powershell, f"Stop-Process -Id {session.operations['worker_pid']} -Force"
+                ),
+                capture_output=True,
+                timeout=60,
+                check=True,
+            )
+        finally:
+            with contextlib.suppress(Exception):
+                session.close()
+            if session.work_dir is not None:
+                shutil.rmtree(session.work_dir, ignore_errors=True)
+        status = renderers.renderer_status("powerpoint", environment, state_dir=state)
+        (owned,) = [item for item in status["powerpoint_processes"] if item["owned"]]
+        assert (owned["record"], owned["stoppable"], owned["has_window"]) == ("active", True, False), status
+        # --stop-owned がなければ終了しない。
+        assert renderers.clear_pending("powerpoint", environment, state_dir=state)["stopped_powerpoint"] == []
+        assert renderers.renderer_status("powerpoint", environment, state_dir=state)["powerpoint_running"]
+        cleared = renderers.clear_pending("powerpoint", environment, stop_owned=True, state_dir=state)
+        assert cleared["status"] == "nothing" and [item["pid"] for item in cleared["stopped_powerpoint"]] == [
+            owned["pid"]
+        ], cleared
+        assert not renderers.renderer_status("powerpoint", environment, state_dir=state)["powerpoint_running"]
 
 
 def test_real_windows_font_directories():

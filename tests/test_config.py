@@ -234,11 +234,12 @@ def test_settings_outside_read_roots_are_not_read(tmp_path, write_deck):
     outside = write(tmp_path / "outside/theme.toml", "[colors\n")
     write(tmp_path / "outside/environment.toml", "jobs = \n")
     root = write_deck(tmp_path / "deck", deck='theme = "../outside/theme.toml"\n' + DECK)
-    with pytest.raises(ValueError, match="宣言した参照範囲外です") as caught:
+    # 入力の解決の誤りは、設定の場所を示す設定の誤りにする（トレースバックを出さない）。元の例外は __cause__ に残す。
+    with pytest.raises(SettingsError, match="theme の指すファイルを使えません（宣言した参照範囲外です") as caught:
         load_project(root)
-    assert not isinstance(caught.value, SettingsError) and str(outside.resolve()) in str(caught.value)
+    assert isinstance(caught.value.__cause__, ValueError) and str(outside.resolve()) in str(caught.value)
     write_deck(root, deck='environment_override = "../outside/environment.toml"\n' + DECK)
-    with pytest.raises(ValueError, match="宣言した参照範囲外です"):
+    with pytest.raises(SettingsError, match="environment_override の指すファイルを使えません（宣言した参照範囲外です"):
         load_project(root)
 
 
@@ -249,15 +250,15 @@ def test_rules_references_are_not_checked_against_unread_theme(tmp_path, write_d
     write(root / "theme.toml", '[roles.caption]\ninherits = "note"\n')
     write(root / "rules.toml", '[math_candidates]\nexclude_roles = ["caption"]\n')
     # パスの誤記は、ないファイルとして示す。
-    with pytest.raises(FileNotFoundError, match="入力ファイルが見つかりません") as caught:
+    with pytest.raises(SettingsError, match="theme の指すファイルを使えません（入力ファイルが見つかりません") as caught:
         load_project(root)
     assert str((root / "themes.toml").resolve()) in str(caught.value)
+    assert isinstance(caught.value.__cause__, FileNotFoundError)
     # 参照範囲の外のテーマは参照範囲の誤りとして示す。
     write(tmp_path / "outside/theme.toml", '[roles.caption]\ninherits = "note"\n')
     write_deck(root, deck='theme = "../outside/theme.toml"\nrules = "rules.toml"\n' + DECK)
-    with pytest.raises(ValueError, match="宣言した参照範囲外です") as caught:
+    with pytest.raises(SettingsError, match="theme の指すファイルを使えません（宣言した参照範囲外です"):
         load_project(root)
-    assert not isinstance(caught.value, SettingsError)
     # 構文の誤りと値の形の誤りは、その問題だけを示す。
     write(root / "theme.toml", '[roles.caption]\ninherits = "note"\n[colors\n')
     write_deck(root, deck='theme = "theme.toml"\nrules = "rules.toml"\n' + DECK)
@@ -322,7 +323,11 @@ def test_listed_python_without_entry_gets_entry_added(tmp_path, write_deck):
     write_deck(root, deck=DECK, extra='[inputs]\npython = ["helper.py", "slides.py"]\n')
     assert load_project(root).config["inputs"]["python"] == [helper, entry]
     write_deck(root, deck=DECK, extra='[inputs]\npython = ["missing.py"]\n')
-    with pytest.raises(FileNotFoundError, match="入力ファイルが見つかりません"):
+    with pytest.raises(SettingsError, match="inputs.python の指すファイルを使えません（入力ファイルが見つかりません"):
+        load_project(root)
+    # 入力文書は識別子で示す。
+    write_deck(root, deck=DECK, extra='[[inputs.documents]]\nid = "notes"\npath = "README.md"\n')
+    with pytest.raises(SettingsError, match="deck.toml: inputs.documents の notes の指すファイルを使えません"):
         load_project(root)
 
 
@@ -718,13 +723,14 @@ def test_environment_override_completes_font_after_merge(tmp_path, write_deck, i
     [message] = lines(settings_error(root))
     assert message.startswith("local.toml: TOML として読めません（")
     write_deck(root, deck='environment_override = "missing.toml"\n' + DECK)
-    with pytest.raises(FileNotFoundError, match="入力ファイルが見つかりません"):
+    with pytest.raises(
+        SettingsError, match="environment_override の指すファイルを使えません（入力ファイルが見つかりません"
+    ):
         load_project(root)
     write(tmp_path / "outside/local.toml", 'schema_version = 1\n[fonts.Example]\npath = "regular.ttf"\n')
     write_deck(root, deck='environment_override = "../outside/local.toml"\n' + DECK)
-    with pytest.raises(ValueError, match="宣言した参照範囲外です") as caught:
+    with pytest.raises(SettingsError, match="宣言した参照範囲外です"):
         load_project(root)
-    assert not isinstance(caught.value, SettingsError)
 
 
 # Project の書体と文献
@@ -755,3 +761,23 @@ def test_project_bibliography_is_loaded_once(tmp_path, write_deck, monkeypatch):
     # 文献ファイルがなければ、bibtexparser を読み込まずに空の一覧を返す。
     monkeypatch.setitem(sys.modules, "bibtexparser", None)
     assert len(load_project(write_deck(tmp_path / "other", deck=DECK)).bibliography) == 0
+
+
+def test_documents_without_content_effect_are_not_tracked(tmp_path, write_deck):
+    """affects_content = false の入力文書は、存在と参照範囲を確かめ、生成記録の照合の対象から外す。"""
+    root = write_deck(
+        tmp_path / "deck",
+        deck=DECK,
+        extra='[[inputs.documents]]\nid = "readme"\npath = "README.md"\naffects_content = false\n'
+        '[[inputs.documents]]\nid = "proof"\npath = "proof.md"\n',
+    )
+    write(root / "README.md", "参考\n")
+    write(root / "proof.md", "証明\n")
+    project = load_project(root)
+    tracked = set(project.input_files)
+    assert str((root / "README.md").resolve()) not in tracked and str((root / "proof.md").resolve()) in tracked
+    documents = {document["id"]: document for document in project.config["inputs"]["documents"]}
+    assert documents["readme"]["affects_content"] is False and Path(documents["readme"]["path"]).is_file()
+    write_deck(root, deck=DECK, extra='[[inputs.documents]]\nid = "readme"\npath = "README.md"\naffects_content = 1\n')
+    with pytest.raises(SettingsError, match="affects_content は真偽値で指定してください"):
+        load_project(root)

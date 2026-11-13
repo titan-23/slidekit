@@ -530,7 +530,9 @@ def render_pdf(input_pptx: Path, output_pdf: Path, renderer: str, environment: M
         return session.render(input_pptx, output_pdf)
 
 
-def _maintenance(mode: str, environment: Mapping, *, state_dir: Path | None, force: bool = False) -> dict:
+def _maintenance(
+    mode: str, environment: Mapping, *, state_dir: Path | None, force: bool = False, stop_owned: bool = False
+) -> dict:
     """作業スクリプトを Status か Clear で 1 回実行し、結果の辞書を返す。排他は取り続けない。"""
     powershell = _powershell(environment)
     context = windows_context(environment)
@@ -542,6 +544,8 @@ def _maintenance(mode: str, environment: Mapping, *, state_dir: Path | None, for
         command = _script_command(powershell, windows_work, mode, _windows_path(state), uuid.uuid4().hex)
         if force:
             command.append("-Force")
+        if stop_owned:
+            command.append("-StopOwned")
         return _result(_run(command, timeout=MAINTENANCE_TIMEOUT_SECONDS))
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -549,6 +553,73 @@ def _maintenance(mode: str, environment: Mapping, *, state_dir: Path | None, for
 
 def _unsupported(name: str) -> RendererError:
     return RendererError(f"未対応の表示ソフトです: {name}", code="unsupported_renderer")
+
+
+def _items(value: Any) -> list[dict]:
+    """作業スクリプトの結果の一覧を辞書の列にする。PowerShell が 1 件の配列を要素だけにした場合も列にする。"""
+    if isinstance(value, dict):
+        value = [value]
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _whole(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _text_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _powerpoint_processes(value: Any, *, available: bool) -> list[dict]:
+    """PowerPoint の処理の一覧（`renderer status` の `powerpoint_processes`）。
+
+    `owned` は、slidekit が起動したと記録した PowerPoint（残存記録か使用中の記録の `powerpoint`）と PID・開始時刻の両方が一致するか、
+    `record` は一致した記録（`pending`・`active`）である。`stoppable` は `renderer clear --stop-owned` が終了する対象か
+    （一致し、ウィンドウがなく、available が真）。available は、排他を持つ処理も、動いている残存記録の作業プロセスもないこと。
+    """
+    processes = []
+    for item in _items(value):
+        owned = item.get("owned") is True
+        has_window = bool(item.get("has_window"))
+        record = item.get("record")
+        processes.append(
+            {
+                "pid": _whole(item.get("pid")),
+                "window_title": str(item.get("window_title") or ""),
+                "has_window": has_window,
+                "started_at": _text_or_none(item.get("started_at")),
+                "owned": owned,
+                "record": record if owned and record in ("pending", "active") else None,
+                "stoppable": owned and not has_window and available,
+            }
+        )
+    return processes
+
+
+def _powerpoint_records(value: Any) -> list[dict]:
+    """slidekit が起動したと記録した PowerPoint（`renderer status` の `powerpoint_records`）。running はその処理が動いているか。"""
+    return [
+        {
+            "source": item.get("source") if item.get("source") in ("pending", "active") else None,
+            "run_id": _text_or_none(item.get("run_id")),
+            "pid": _whole(item.get("pid")),
+            "started_at": _text_or_none(item.get("started_at")),
+            "running": item.get("running") is True,
+        }
+        for item in _items(value)
+    ]
+
+
+def _stopped_powerpoint(value: Any) -> list[dict]:
+    """`renderer clear --stop-owned` が終了した PowerPoint（PID・開始時刻・一致した記録）。"""
+    return [
+        {
+            "pid": _whole(item.get("pid")),
+            "started_at": _text_or_none(item.get("started_at")),
+            "record": item.get("record") if item.get("record") in ("pending", "active") else None,
+        }
+        for item in _items(value)
+    ]
 
 
 def renderer_status(name: str, environment: Mapping, *, state_dir: Path | None = None) -> dict:
@@ -559,6 +630,9 @@ def renderer_status(name: str, environment: Mapping, *, state_dir: Path | None =
     `staged_input_locked` は残存記録の検査用の複製を排他で開くことができないか（どちらも残存記録がなければ None）。
     PowerPoint は読み取り専用で開いた複製のファイルを開いたままにしないので、偽でも PowerPoint が複製を開いていることがある。
     `abandoned` は排他を持っていた処理が放さずに終わっていたか（この確認で取って放したので、後の処理には残らない）。
+    `powerpoint_processes` は PowerPoint の処理ごとの PID・ウィンドウの題名・開始時刻と、slidekit が起動したと記録した PowerPoint と
+    一致するか（`_powerpoint_processes`）、`powerpoint_records` はその記録と、記録の処理が動いているかである。
+    記録は作業スクリプトが PowerPoint を起動したときに書く（残存記録と使用中の記録の `powerpoint`）。古い記録には記録がない。
     """
     result = {"command": "renderer status", "renderer": name}
     if name == "libreoffice":
@@ -571,6 +645,8 @@ def renderer_status(name: str, environment: Mapping, *, state_dir: Path | None =
             "pending_process_alive": None,
             "staged_input_locked": None,
             "powerpoint_running": None,
+            "powerpoint_processes": None,
+            "powerpoint_records": None,
             "abandoned": None,
             "state_dir": None,
             "message": "LibreOffice には残存記録がありません。",
@@ -581,31 +657,50 @@ def renderer_status(name: str, environment: Mapping, *, state_dir: Path | None =
     value = _maintenance("Status", environment, state_dir=state_dir)
     busy = bool(value.get("busy"))
     pending = value.get("pending") if isinstance(value.get("pending"), dict) else None
-    status = "busy" if busy else "pending" if pending is not None or value.get("pending_exists") else "idle"
+    exists = pending is not None or bool(value.get("pending_exists"))
+    status = "busy" if busy else "pending" if exists else "idle"
+    alive = value.get("pending_process_alive")
     return {
         **result,
         "status": status,
         "busy": busy,
         "holder": _holder(value.get("holder")) if busy else None,
         "pending": pending,
-        "pending_process_alive": value.get("pending_process_alive"),
+        "pending_process_alive": alive,
         "staged_input_locked": value.get("staged_input_locked"),
         "powerpoint_running": bool(value.get("powerpoint_running")),
+        "powerpoint_processes": _powerpoint_processes(
+            value.get("powerpoint_processes"), available=not busy and not (exists and alive)
+        ),
+        "powerpoint_records": _powerpoint_records(value.get("powerpoint_records")),
         "abandoned": bool(value.get("abandoned")),
         "state_dir": value.get("state_dir"),
         "exit_code": 0 if status == "idle" else 1,
     }
 
 
-def clear_pending(name: str, environment: Mapping, *, force: bool = False, state_dir: Path | None = None) -> dict:
-    """安全を確かめてから残存記録を解除する（`slidekit renderer clear`）。PowerPoint には触れない。
+def clear_pending(
+    name: str,
+    environment: Mapping,
+    *,
+    force: bool = False,
+    stop_owned: bool = False,
+    state_dir: Path | None = None,
+) -> dict:
+    """安全を確かめてから残存記録を解除する（`slidekit renderer clear`）。
 
     解除するのは、排他を取得したうえで、残存記録の作業プロセスが動いておらず、検査用の複製を排他で開くことに成功したときである。
     PowerPoint は読み取り専用で開いた複製のファイルを開いたままにしないので、排他で開くことに成功しても、PowerPoint が複製を開いていないとは
     言えない。PowerPoint が起動しているときは、複製の有無によらず force のときだけ解除する（複製を排他で開くことに失敗したときは force でも断る）。
+    ただし、残存記録の変換に使った PowerPoint が slidekit の起動したものと記録されていて、もう動いていなければ、force を求めない。
     解除した記録は状態フォルダーの `cleared/` へ移し、作業フォルダーが Windows の一時フォルダーの `slidekit` の下にあれば消す。
     あわせて、24 時間より古く、どの記録も指していない作業フォルダー `ppt-*` を消す。
     `status` は `cleared`・`nothing`・`refused` で、断ったときは `exit_code` が 1。
+
+    stop_owned が真なら、作業プロセスが動いていないことを確かめた後、slidekit が起動したと確かめることができる PowerPoint
+    （記録と PID・開始時刻の両方が一致し、ウィンドウがないもの）だけを強制終了してから解除する。残存記録がなくても、前の処理が
+    残した使用中の記録と一致する PowerPoint は終了する。一致する PowerPoint にウィンドウがあれば、終了せずに断る。
+    終了した PowerPoint は `stopped_powerpoint`（`pid`・`started_at`・`record`）に入る。ほかの PowerPoint には触れない。
     """
     result = {"command": "renderer clear", "renderer": name}
     if name == "libreoffice":
@@ -618,11 +713,12 @@ def clear_pending(name: str, environment: Mapping, *, force: bool = False, state
             "removed_old_work_dirs": 0,
             "pending": None,
             "holder": None,
+            "stopped_powerpoint": [],
             "exit_code": 0,
         }
     if name != "powerpoint":
         raise _unsupported(name)
-    value = _maintenance("Clear", environment, state_dir=state_dir, force=force)
+    value = _maintenance("Clear", environment, state_dir=state_dir, force=force, stop_owned=stop_owned)
     status = value.get("status")
     if status not in ("cleared", "nothing", "refused"):
         raise RendererError(f"残存記録の解除の結果が不正です: {status}", code="renderer_protocol", result=value)
@@ -635,6 +731,7 @@ def clear_pending(name: str, environment: Mapping, *, force: bool = False, state
         "removed_old_work_dirs": int(value.get("removed_old_work_dirs") or 0),
         "pending": value.get("pending") if isinstance(value.get("pending"), dict) else None,
         "holder": _holder(value.get("holder")),
+        "stopped_powerpoint": _stopped_powerpoint(value.get("stopped")),
         "exit_code": 1 if status == "refused" else 0,
     }
 

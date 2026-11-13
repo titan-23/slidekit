@@ -11,7 +11,13 @@ import pytest
 from fake_fonts import FakeFonts
 from slidekit.diagnostics import DIAGNOSTICS
 from slidekit.math.syntax import parse
-from slidekit.validators import apply_declarations, make_diagnostic, merge_diagnostics, validate_scene
+from slidekit.validators import (
+    apply_declarations,
+    make_diagnostic,
+    merge_diagnostics,
+    skip_role_checks,
+    validate_scene,
+)
 from test_diagnostics import REPORTERS, SOURCE, _strings
 
 
@@ -482,8 +488,17 @@ def test_layout_bounds_overflow(project):
             "area": [20.0, 40.0, 180.0, 40.0],
             "bounds": [20.0, 20.0, 200.0, 50.0],
             "overflow_pt": {"side": "bottom", "amount": 10.0},
+            "stack_overflow_pt": 10.0,
+            "stack_elements": [{"id": stacked["id"], "height_pt": 40.0}],
         }
     ]
+    # 同じ積み上げの領域の要素をまとめ、積み上げの全体で足りない量と各要素の高さを示す。
+    first = element("lead", area=(20, 20, 180, 30), layout_bounds=[20, 20, 200, 50])
+    second = element("body", area=(20, 56, 180, 30), layout_bounds=[20, 20, 200, 50])
+    issue = issue_of(validate(scene(first, second), project), "layout_bounds_overflow")
+    (observed,) = issue["observations"]
+    assert observed["stack_overflow_pt"] == 16.0
+    assert observed["stack_elements"] == [{"id": "lead", "height_pt": 30.0}, {"id": "body", "height_pt": 30.0}]
     stacked["layout_bounds"] = [20, 20, 200, 100]
     assert "layout_bounds_overflow" not in codes(validate(scene(stacked), project))
 
@@ -1037,3 +1052,27 @@ def test_apply_declarations_matches_pairs_and_reports_unused():
     ]
     assert [issue["observations"][0]["code"] for issue in unused] == ["text_overflow", "line_break"]
     assert apply_declarations(issues, {"slides": [{"id": "first"}]}) == issues
+
+
+def test_role_skip_checks_remove_warnings_and_info_of_that_role():
+    scene = {
+        "theme": {"roles": {"references": {"skip_checks": ["math_not_marked", "text_wrap_mid_phrase"]}, "body": {}}},
+        "slides": [
+            {
+                "id": "refs",
+                "elements": [{"id": "list", "role": "references"}, {"id": "lead"}],
+            }
+        ],
+    }
+    issues = [
+        {"code": "math_not_marked", "severity": "warning", "slide_id": "refs", "element_id": "list"},
+        {"code": "text_wrap_mid_phrase", "severity": "info", "slide_id": "refs", "element_id": "list"},
+        {"code": "math_not_marked", "severity": "warning", "slide_id": "refs", "element_id": "lead"},
+        {"code": "text_overflow", "severity": "error", "slide_id": "refs", "element_id": "list"},
+    ]
+    kept = skip_role_checks(issues, scene)
+    assert [(issue["code"], issue["element_id"]) for issue in kept] == [
+        ("math_not_marked", "lead"),
+        ("text_overflow", "list"),
+    ]
+    assert skip_role_checks(issues, {**scene, "theme": {"roles": {}}}) == issues

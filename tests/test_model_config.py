@@ -262,6 +262,20 @@ def test_page_kinds_and_aspect_ratios(project_dir):
         assert page["content_area"][2] > 0
 
 
+def test_page_number_format_shows_total(project_dir):
+    """page_number_format の {page} と {total} を、ページ番号と全体のページ数に置き換える。"""
+    project = load_project(project_dir)
+    project.theme["page_kinds"]["content"]["page_number_format"] = "{page} / {total}"
+    deck = Deck(project)
+    for index in range(3):
+        deck.slide(id=f"page{index}", kind="content", title="題名")
+    labels = []
+    for page in deck.to_dict()["slides"]:
+        footer = next(e for e in page["elements"] if e["id"] == "_theme/footer")
+        labels.append("".join(fragment["text"] for fragment in footer["content"]))
+    assert labels == ["1 / 3", "2 / 3", "3 / 3"]
+
+
 def test_template_uses_only_blank_layout_and_is_read_only(project_dir):
     from pptx import Presentation
 

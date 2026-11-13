@@ -380,8 +380,16 @@ class FontRegistry:
         インクは根号・分数線・伸びた括弧を含む描画範囲、行の配置に使う上下は根号の上の余白などを含む組版上の上下である。
         """
         box = self.math_layout(expr, size, bold, family=family, display=display, japanese=japanese, latin=latin)
+        # 描画範囲の左右は、インクがあるときだけ渡す（ないときは送り幅の範囲とみなす）。
+        inked = any(value != 0.0 for value in box.ink)
         return measure.MathBox(
-            box.width, max(0.0, box.ink[2]), max(0.0, box.ink[3]), max(0.0, box.height), max(0.0, box.depth)
+            box.width,
+            max(0.0, box.ink[2]),
+            max(0.0, box.ink[3]),
+            max(0.0, box.height),
+            max(0.0, box.depth),
+            box.ink[0] if inked else None,
+            box.ink[1] if inked else None,
         )
 
     def math_layout(

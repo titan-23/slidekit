@@ -160,6 +160,8 @@ class Bar:
 
 Node = Union[Run, Text, Space, Fenced, Fraction, Radical, Scripts, Limits, Nary, Function, Accent, Bar]
 
+# \text の中の - を書き出すハイフン（U+2010）。PowerPoint は数式の中の - を文章でもマイナス記号で描く。
+TEXT_HYPHEN = "\u2010"
 SUBS = dict(zip("₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ", "0123456789+-=()aehijklmnoprstuvx"))
 SUPS = dict(zip("⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿⁱ", "0123456789+-=()ni"))
 TOKEN = re.compile(r"\\[A-Za-z]+|\\.|[A-Za-z]+|\d+(?:\.\d+)?|\s+|.")
@@ -641,7 +643,8 @@ class _Parser:
                 self.fail("数式内の文章に入れ子や命令は使えない", self.index)
             parts.append(self.pop())
         self.pop()
-        return (Text("".join(parts)),)
+        # PowerPoint は数式の中の - を文章（m:nor）でもマイナス記号で描くので、ハイフン（U+2010）にする。
+        return (Text("".join(parts).replace("-", TEXT_HYPHEN)),)
 
     def _boldsymbol(self, index: int) -> tuple[Node, ...]:
         return self.styled(index, None, None, bold=True)

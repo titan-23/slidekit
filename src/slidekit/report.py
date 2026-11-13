@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from functools import partial
 import math
 from pathlib import Path
@@ -32,12 +33,15 @@ COMMAND_LABELS = {
     "review accept": "警告の許容",
     "review revoke": "記録の取り消し",
     "review carry": "確認の引き継ぎ",
+    "review sheet": "比較画像",
+    "measure": "計測",
 }
 STATUS_LABELS = {
     "passed": "合格",
     "failed": "失敗",
     "built": "完了",
     "stopped": "変換の前に停止",
+    "written": "作成した",
     "exported": "完了",
     "preview": "削除の候補",
     "cleaned": "削除",
@@ -163,11 +167,21 @@ def count_issues(issues: Iterable[dict]) -> dict:
 # ---------------------------------------------------------------- 要約
 
 
-def summarize(command: str, result: dict, *, limit: int = 20) -> str:
+# 要約の表示の選択（summarize の引数）。verbose は許容した警告と参考の一覧、wraps は配置の検査の行の文字列を出す。
+_OPTIONS: ContextVar[dict] = ContextVar("slidekit_report_options", default={})
+
+
+def _option(name: str) -> bool:
+    return bool(_OPTIONS.get().get(name))
+
+
+def summarize(command: str, result: dict, *, limit: int = 20, verbose: bool = False, wraps: bool = False) -> str:
     """コマンドの結果の要約。
 
     1 行目は状態と件数、2 行目以降に対象、診断（エラーは全件。ただし 50 件まで。警告と参考は合わせて limit 件まで）、
-    所要時間、最後に次の操作を示す。知らない command や形の違う result でも例外を出さない。
+    所要時間、次の操作を示し、最後の行を合否と終了コードの行（「結果: …」）にする。
+    許容した警告（宣言と記録）と生成の参考は件数だけを示し、verbose のときに一覧を出す。
+    wraps は配置の検査で、自動で折り返した要素の行の文字列を示す。知らない command や形の違う result でも例外を出さない。
     """
     try:
         data = dict(result) if isinstance(result, dict) else {}
@@ -178,15 +192,67 @@ def summarize(command: str, result: dict, *, limit: int = 20) -> str:
         summary = partial(_command_failure, command=command)
     limit = limit if _integer(limit) and limit >= 0 else 20
     lines: list[str] = []
-    if summary is not None:
-        try:
-            lines = summary(data, limit)
-        except Exception:
-            # 要約が出せなくても、状態と文言は必ず示す（結果の辞書は --json で読むことができる）。
-            lines = []
-    if not lines:
-        lines = _minimal(command, data)
+    token = _OPTIONS.set({"verbose": bool(verbose), "wraps": bool(wraps)})
+    try:
+        if summary is not None:
+            try:
+                lines = summary(data, limit)
+            except Exception:
+                # 要約が出せなくても、状態と文言は必ず示す（結果の辞書は --json で読むことができる）。
+                lines = []
+        if not lines:
+            lines = _minimal(command, data)
+        lines.append(_result_line(command, data))
+    finally:
+        _OPTIONS.reset(token)
     return "\n".join(lines)
+
+
+# 終了コードの意味（cli の説明と同じ）。検査のコマンドは合格・不合格と示す。
+_EXIT_LABELS = {0: "成功", 1: "未解決の事項あり", 2: "失敗"}
+_CHECK_COMMANDS = frozenset({"layout", "doctor", "check"})
+
+
+def _result_line(command: Any, data: dict) -> str:
+    """最後の行。合否と、残っている事項の件数と、終了コード。末尾だけを読めば結果が分かるようにする。"""
+    code = data.get("exit_code")
+    if not _integer(code):
+        code = 2 if data.get("status") == "failed" else 0
+    command = command if isinstance(command, str) else ""
+    if data.get("exception") == "KeyboardInterrupt" or data.get("message") == "処理を中断しました":
+        return f"結果: 中断（終了コード {code}）"
+    if command in _CHECK_COMMANDS or command == "export":
+        label = {0: "合格" if command != "export" else "反映した", 1: "不合格", 2: "失敗"}.get(code, "失敗")
+        if command == "export" and code != 0:
+            label = "中止"
+    else:
+        label = _EXIT_LABELS.get(code, "失敗")
+    parts = []
+    counts = data.get("counts") if isinstance(data.get("counts"), dict) else None
+    check = data if command == "check" else data.get("check") if isinstance(data.get("check"), dict) else None
+    if counts is not None and _integer(counts.get("error")):
+        parts.append(f"エラー {counts['error']}")
+    elif check is not None and isinstance(check.get("issues"), list):
+        issues = _issues(check["issues"])
+        missing = sum(1 for issue in issues if issue.get("code") == "review_missing")
+        unaccepted = sum(1 for issue in issues if issue.get("code") == "warning_unaccepted")
+        parts.append(f"エラー {len(issues) - missing - unaccepted}")
+        if check.get("final"):
+            parts += [f"未完了の確認 {missing}", f"未対応の警告 {unaccepted}"]
+    elif command == "review status":
+        groups = _issues(data.get("reviews"))
+        warnings = data.get("warnings") if isinstance(data.get("warnings"), dict) else {}
+        pending = sum(len(group["pending"]) for group in groups if isinstance(group.get("pending"), list))
+        parts += [
+            f"エラー {len(_issues(data.get('errors')))}",
+            f"未完了の確認 {pending}",
+            f"未対応の警告 {len(_issues(warnings.get('pending')))}",
+        ]
+    remaining = data.get("remaining") if isinstance(data.get("remaining"), dict) else None
+    if remaining is not None and (text := _remaining_text(remaining)):
+        parts.append(f"残りの確認 {text}")
+    parts.append(f"終了コード {code}")
+    return f"結果: {label}（{'、'.join(parts)}）"
 
 
 def _label(command: Any) -> str:
@@ -346,6 +412,25 @@ def _overflow(area: Any, outer: Any) -> list[tuple[str, float]]:
     return [(side, amount) for side, amount in sides if amount >= 0.05]
 
 
+_SIDE_NAMES = {"left": "左", "top": "上", "right": "右", "bottom": "下"}
+
+
+def _sizing_parts(item: dict) -> list[str]:
+    """文字のはみ出しの観測値から、折り返した行数・高さの不足・1 行に収めるのに要る幅を示す文。"""
+    parts = []
+    lines, hard = item.get("lines"), item.get("hard_lines")
+    single, shortfall = item.get("single_line_width_pt"), item.get("height_shortfall_pt")
+    if _integer(lines) and _integer(hard) and lines > hard:
+        parts.append(f"{lines} 行に折り返した" + (f"（明示改行で {hard} 行）" if hard > 1 else ""))
+    if _number(shortfall):
+        parts.append(f"高さが {shortfall:.1f} pt 足りない")
+    if _number(single):
+        parts.append(
+            f"{'1 行' if not _integer(hard) or hard == 1 else '明示改行の行ごとに 1 行'}に収めるには内側の幅 {single:.1f} pt が要る"
+        )
+    return parts
+
+
 def _observation_text(issue: dict) -> str:
     """要約で添える観測値の要点（括弧付き）。対応のない識別子は空にする。"""
     code = issue.get("code")
@@ -353,9 +438,19 @@ def _observation_text(issue: dict) -> str:
         width = (item["required_width_pt"], item["available_width_pt"])
         height = (item.get("required_height_pt"), item.get("available_height_pt"))
         if all(_number(value) for value in (*width, *height)):
-            return f"（必要な寸法 {width[0]:.1f}×{height[0]:.1f} pt、使える寸法 {width[1]:.1f}×{height[1]:.1f} pt）"
+            parts = [f"必要な寸法 {width[0]:.1f}×{height[0]:.1f} pt、使える寸法 {width[1]:.1f}×{height[1]:.1f} pt"]
+            return "（" + "。".join(parts + _sizing_parts(item)) + "）"
         if all(_number(value) for value in width):
             return f"（必要な幅 {width[0]:.1f} pt、使える幅 {width[1]:.1f} pt）"
+    if code == "text_padding_overlap" and (item := _first(issue, "overflow_pt")):
+        side = item["overflow_pt"].get("side") if isinstance(item["overflow_pt"], dict) else None
+        amount = item["overflow_pt"].get("amount") if isinstance(item["overflow_pt"], dict) else None
+        if side in _SIDE_NAMES and _number(amount):
+            return "（" + "。".join([f"{_SIDE_NAMES[side]}の余白に {amount:.1f} pt 入る", *_sizing_parts(item)]) + "）"
+    if code == "text_short_line" and (values := _gathered(issue, "short_texts")):
+        return "（最後の行: " + "、".join(_quoted(value, 12) for value in values[:5]) + "）"
+    if code in {"text_wrap_mid_phrase", "text_wrap_hyphen"} and (values := _gathered(issue, "breaks")):
+        return "（" + "、".join(_quoted(value, 24) for value in values[:5]) + "）"
     if code in {"page_overflow", "content_area_overflow"} and (item := _first(issue, "area")):
         outer, name = (
             (item.get("page"), "ページ") if code == "page_overflow" else (item.get("content_area"), "本文領域")
@@ -363,6 +458,24 @@ def _observation_text(issue: dict) -> str:
         sides = _overflow(item["area"], outer)
         if sides:
             return f"（{name}から" + "、".join(f"{side}へ {amount:.1f} pt" for side, amount in sides) + " はみ出し）"
+    if code == "layout_bounds_overflow" and (item := _first(issue, "overflow_pt")):
+        amount = item["overflow_pt"].get("amount") if isinstance(item["overflow_pt"], dict) else None
+        side = item["overflow_pt"].get("side") if isinstance(item["overflow_pt"], dict) else None
+        parts = [f"{_SIDE_NAMES.get(side, '')}へ {amount:.1f} pt はみ出し"] if _number(amount) else []
+        total, members = item.get("stack_overflow_pt"), _issues(item.get("stack_elements"))
+        if _number(total) and total > 0 and len(members) > 1:
+            listed = "、".join(
+                f"{_text(member.get('id'))} {member['height_pt']:.1f}"
+                for member in members[:6]
+                if _number(member.get("height_pt"))
+            )
+            parts.append(
+                f"積み上げの全体で {total:.1f} pt 足りない（高さ pt: {listed}"
+                + (" ほか" if len(members) > 6 else "")
+                + "）"
+            )
+        if parts:
+            return "（" + "。".join(parts) + "）"
     if code == "math_not_marked" and (values := _gathered(issue, "candidates")):
         return f"（候補: {_listed(values)}）"
     if code in {"font_glyph_missing", "forbidden_character"} and (values := _gathered(issue, "characters")):
@@ -436,10 +549,27 @@ def _issue_lines(issue: dict, run: Any) -> list[str]:
     return _failure_lines(issue, run) or ["  " + _issue_line(issue)]
 
 
-def _issue_sections(issues: list[dict], limit: int, *, run: Any = None, rest: str = "--json で全件を表示") -> list[str]:
+def _issue_sections(
+    issues: list[dict],
+    limit: int,
+    *,
+    run: Any = None,
+    rest: str = "--json で全件を表示",
+    collapse_info: bool = False,
+) -> list[str]:
+    """エラー、警告と参考の一覧。宣言で許容した警告（collapse_info なら参考も）は、verbose でなければ件数だけを示す。"""
     ordered = sort_issues(issues)
     errors = [issue for issue in ordered if issue.get("severity") == "error"]
     others = [issue for issue in ordered if issue.get("severity") != "error"]
+    folded: list[str] = []
+    if not _option("verbose"):
+        declared = [issue for issue in others if _declared(issue)]
+        info = [issue for issue in others if collapse_info and issue.get("severity") == "info"]
+        others = [issue for issue in others if not _declared(issue) and not (collapse_info and issue in info)]
+        if declared:
+            folded.append(f"宣言で許容した警告 {len(declared)} 件")
+        if info:
+            folded.append(f"参考 {len(info)} 件")
     lines: list[str] = []
     if errors:
         lines.append("エラー:")
@@ -454,6 +584,8 @@ def _issue_sections(issues: list[dict], limit: int, *, run: Any = None, rest: st
             lines.extend(_issue_lines(issue, run))
         if len(others) > limit:
             lines.append(f"  ほか {len(others) - limit} 件（{rest}）")
+    if folded:
+        lines.append("、".join(folded) + "（一覧は --verbose）")
     return lines
 
 
@@ -541,6 +673,7 @@ def _layout(result: dict, limit: int) -> list[str]:
             f"配置の検査: {_state(result, issues)}",
             _project_line(result),
             *_issue_sections(issues, limit),
+            *(_wrap_listing(result) if _option("wraps") else []),
             _timing_line(result),
             *_next([operation]),
         ]
@@ -672,9 +805,10 @@ def _build(result: dict, limit: int) -> list[str]:
         [
             f"生成: {state}",
             target,
-            *_issue_sections(issues, limit, run=run, rest="diagnostics.json"),
+            *_issue_sections(issues, limit, run=run, rest="diagnostics.json", collapse_info=True),
             _timing_line(result),
-            carry,
+            _comparison_line(result.get("comparison")),
+            *carry,
             picture,
             *_next(operations),
         ]
@@ -693,17 +827,89 @@ def _distinct(values: Any) -> list[str]:
     return list(dict.fromkeys(_text(value) for value in values)) if isinstance(values, list) else []
 
 
-def _carry_line(carry: Any) -> str | None:
-    """生成の後の確認の引き継ぎ（build の結果の carry）の 1 行。"""
-    if not isinstance(carry, dict):
+def _run_names(values: Any) -> str:
+    """{実行のパスか名前: 件数} を「0133 29 件、0120 2 件」の形にする。"""
+    if not isinstance(values, dict):
+        return ""
+    return "、".join(f"{Path(_text(name)).name} {count} 件" for name, count in values.items() if _integer(count))
+
+
+_KIND_NAMES = {"visual": "表示", "content": "内容"}
+
+
+def _reason_text(reasons: Any) -> list[str]:
+    """引き継げなかった確認の理由を、種類ごとに「表示: ページの表示の変更 2、表示環境の変更 1」の形で示す。"""
+    grouped: dict[str, dict[str, int]] = {}
+    documents: dict[str, list[str]] = {}
+    for item in _issues(reasons):
+        kind = _KIND_NAMES.get(item.get("kind"))
+        reason = _text(item.get("reason"))
+        if not kind or not reason:
+            continue
+        counts = grouped.setdefault(kind, {})
+        counts[reason] = counts.get(reason, 0) + 1
+        for name in item.get("documents") or []:
+            if _text(name) not in documents.setdefault(kind, []):
+                documents[kind].append(_text(name))
+    lines = []
+    for kind, counts in grouped.items():
+        parts = [
+            f"{reason} {count}"
+            + (f"（{'、'.join(documents[kind])}）" if reason == "元資料の変更" and documents.get(kind) else "")
+            for reason, count in counts.items()
+        ]
+        lines.append(f"{kind}: {'、'.join(parts)}")
+    return lines
+
+
+def _change_text(change: dict) -> str:
+    before, after = change.get("before"), change.get("after")
+    return f"{_text(change.get('item'))} {_text(before) or 'なし'} → {_text(after) or 'なし'}"
+
+
+def _comparison_line(comparison: Any) -> str | None:
+    """build の結果の comparison（前の実行とのページ画像の比較）の 1 行。"""
+    if not isinstance(comparison, dict) or not comparison.get("run"):
         return None
+    numbers = comparison.get("numbers") if isinstance(comparison.get("numbers"), dict) else {}
+
+    def pages(key: str) -> str:
+        values = comparison.get(key) if isinstance(comparison.get(key), list) else []
+        known = [numbers[value] for value in values if _integer(numbers.get(value))]
+        listed = format_numbers(known) if len(known) == len(values) else _listed_ids(values)
+        return f"{len(values)}" + (
+            f"（p.{listed}）" if values and len(known) == len(values) and key != "unchanged" else ""
+        )
+
+    parts = [
+        f"変更なし {pages('unchanged')}",
+        f"ページ番号だけ変わった {pages('renumbered')}",
+        f"変わった {pages('changed')}",
+    ]
+    if comparison.get("added"):
+        parts.append(f"新しいページ {pages('added')}")
+    if comparison.get("removed"):
+        parts.append(f"外したページ {len(comparison['removed'])}")
+    return f"前の実行 {_text(comparison['run'])} との比較: " + "、".join(parts)
+
+
+def _carry_line(carry: Any) -> list[str]:
+    """生成の後の確認の引き継ぎ（build の結果の carry）。1 行目に件数、続く行に比べた実行・理由・表示環境の違いを示す。"""
+    if not isinstance(carry, dict):
+        return []
     status = carry.get("status")
     if status == "carried":
         count = carry.get("count")
         text = f"確認の引き継ぎ: {count if _integer(count) else 0} 件"
         notes = []
+        if sources := _run_names(carry.get("sources")):
+            notes.append(f"引き継ぎ元 {sources}")
         if renumbered := _distinct(carry.get("renumbered")):
-            notes.append(f"ページ番号だけ変わったページ {len(renumbered)} 件")
+            compared = carry.get("renumbered_from") if isinstance(carry.get("renumbered_from"), dict) else {}
+            runs = "・".join(Path(_text(name)).name for name in compared)
+            notes.append(
+                f"ページ番号だけ変わったページ {len(renumbered)} 件" + (f"（実行 {runs} と比較）" if runs else "")
+            )
         if remaining := _remaining_text(carry.get("remaining")):
             notes.append(f"未確認 {remaining}")
         # 候補にしなかった実行（形式 1 の実行など）。初めて生成した 0.1 の資料で、前の実行を飛ばしたことを示す。
@@ -712,9 +918,25 @@ def _carry_line(carry: Any) -> str | None:
             notes.append(
                 "候補にしなかった実行 " + "・".join(f"{_text(name)} {count} 件" for name, count in skipped_runs.items())
             )
-        return text + (f"（{'、'.join(notes)}）" if notes else "")
+        lines = [text + (f"（{'、'.join(notes)}）" if notes else "")]
+        reasons = _reason_text(carry.get("pending_reasons"))
+        skipped = carry.get("skipped") if isinstance(carry.get("skipped"), dict) else {}
+        if reasons or skipped:
+            lines.append(
+                "  引き継がなかった理由: "
+                + "。".join(reasons + [f"{_text(reason)} {count}" for reason, count in skipped.items()])
+            )
+        changes = _issues(carry.get("environment_changes"))
+        if changes:
+            compared = carry.get("compared_run")
+            shown = "、".join(_change_text(change) for change in changes[:6])
+            more = f" ほか {len(changes) - 6} 件" if len(changes) > 6 else ""
+            lines.append(
+                f"  表示環境の変更" + (f"（実行 {_text(compared)} から）" if compared else "") + f": {shown}{more}"
+            )
+        return lines
     label = STATUS_LABELS.get(status, _text(status) or "状態不明")
-    return f"確認の引き継ぎ: {label}" + (f"（{carry['message']}）" if carry.get("message") else "")
+    return [f"確認の引き継ぎ: {label}" + (f"（{carry['message']}）" if carry.get("message") else "")]
 
 
 def _run_of(result: dict) -> Any:
@@ -750,6 +972,15 @@ def _check_body(result: dict, limit: int, *, run: Any = None) -> tuple[list[str]
             listed = (
                 (paths[0] + (f" ほか {len(paths) - 1} 件" if len(paths) > 1 else "")) if paths else f"{len(group)} 件"
             )
+            kinds: dict[str, list[str]] = {}
+            for issue in group:
+                if issue.get("input_kind") and isinstance(issue.get("path"), str):
+                    kinds.setdefault(_text(issue["input_kind"]), []).append(_shown(issue["path"]))
+            if kinds:
+                listed = "、".join(
+                    f"{kind}: {Path(found[0]).name}" + (f" ほか {len(found) - 1} 件" if len(found) > 1 else "")
+                    for kind, found in kinds.items()
+                )
             lines.append(f"  {value} {_text(group[0].get('message'))}（{listed}）")
     lines.extend(_issue_sections(others, limit, run=run))
     if missing:
@@ -757,12 +988,19 @@ def _check_body(result: dict, limit: int, *, run: Any = None) -> tuple[list[str]
         targets: dict[str, list[dict]] = {}
         for issue in missing:
             targets.setdefault(_review_target(issue.get("target")), []).append(issue.get("target") or {})
+        numbers: dict[str, list[int]] = {}
+        for issue in missing:
+            if _integer(issue.get("slide_number")):
+                numbers.setdefault(_review_target(issue.get("target")), []).append(issue["slide_number"])
         for name, group in targets.items():
             first = next(
                 (target.get("slide_id") for target in group if isinstance(target, dict) and target.get("slide_id")),
                 None,
             )
-            lines.append(f"  {name} {len(group)} 件" + (f"（先頭: {first}）" if first else ""))
+            if numbers.get(name):
+                lines.append(f"  {name} {len(group)} 件（p.{format_numbers(numbers[name])}）")
+            else:
+                lines.append(f"  {name} {len(group)} 件" + (f"（先頭: {first}）" if first else ""))
     if unaccepted:
         lines.append("未対応の警告:")
         known = {warning.get("diagnostic_id"): warning for warning in warnings}
@@ -790,6 +1028,8 @@ def _declared_lines(entries: Any, limit: int, *, indent: str = "") -> list[str]:
     declared = _issues(entries)
     if not declared:
         return []
+    if not _option("verbose"):
+        return [f"{indent}宣言で許容した警告: {len(declared)} 件（一覧は --verbose）"]
     lines = [f"{indent}宣言で許容した警告:"]
     for entry in declared[:limit]:
         parts = [page] if (page := _page_label(entry)) is not None else []
@@ -879,10 +1119,21 @@ def _export(result: dict, limit: int) -> list[str]:
         )
     if check is not None:
         body, _ = _check_body(check, limit, run=run)
-        operation = f"slidekit review status --build {_argument(run)}" if run else "slidekit review status"
-        return _compact(
-            ["反映: 中止（最終検査に不合格）", f"実行: {_shown(run)}" if run else None, *body, *_next([operation])]
-        )
+        body.extend(_declared_lines(check.get("declared_warnings"), limit))
+        codes = {issue.get("code") for issue in _issues(check.get("issues"))}
+        operations = [item for item in result.get("next") or [] if isinstance(item, str)]
+        if result.get("exit_code") == 2 and codes & {"artifact_unrecorded", "artifact_changed", "input_changed"}:
+            operations = [_blocked_operation(codes)]
+        elif not operations:
+            operations = [f"slidekit review status --build {_argument(run)}" if run else "slidekit review status"]
+        lines = ["反映: 中止（最終検査に不合格）", f"実行: {_shown(run)}" if run else None, *body]
+        # 足りない確認を記録するコマンドを並べる（review status と同じ。確認者と確認内容は画像を見てから書き換える）。
+        if len(operations) == 1:
+            lines.append(f"次の操作: {operations[0]}")
+        else:
+            lines.append("次の操作:")
+            lines.extend(f"  {operation}" for operation in operations[: max(limit, 1)])
+        return _compact(lines)
     return []
 
 
@@ -966,6 +1217,47 @@ def _holder_text(holder: dict) -> str:
     return "、".join(parts) or "情報なし"
 
 
+_OWNED_RECORDS = {"pending": "残存記録", "active": "使用中の記録"}
+
+
+def _dicts(value: Any) -> list[dict]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _pids(items: list[dict]) -> str:
+    return "、".join(_text(item.get("pid")) for item in items)
+
+
+def _powerpoint_process_text(item: dict) -> str:
+    """PowerPoint の処理の 1 行。PID・ウィンドウ・開始時刻と、slidekit が起動したと記録した PowerPoint と一致するか。"""
+    title = _text(item.get("window_title"))
+    window = f"題名「{title}」" if title else "題名のないウィンドウ" if item.get("has_window") else "ウィンドウなし"
+    started = _text(item.get("started_at")) or "不明"
+    if item.get("owned"):
+        owner = f"slidekit が起動（{_OWNED_RECORDS.get(item.get('record'), '記録')}と一致）"
+    else:
+        owner = "slidekit が起動した記録と一致しない"
+    return f"  PID {_text(item.get('pid'))}、{window}、開始 {started}、{owner}"
+
+
+def _recorded_powerpoint(result: dict, pending: dict) -> tuple[str, bool]:
+    """残存記録の変換に使った PowerPoint の説明と、それが slidekit の起動したもので、もう動いていないか。"""
+    owned = pending.get("powerpoint")
+    if not isinstance(owned, dict):
+        return "記録なし（古い形式の記録か、PowerPoint を起動する前の記録）", False
+    if owned.get("started") is not True:
+        return "既に起動していた PowerPoint（slidekit は終了しない）", False
+    record = next(
+        (item for item in _dicts(result.get("powerpoint_records")) if item.get("source") == "pending"),
+        None,
+    )
+    if record is None or record.get("pid") is None:
+        return "slidekit が起動（PID の記録なし）", False
+    if record.get("running"):
+        return f"slidekit が起動（PID {_text(record['pid'])}、動作中）", False
+    return f"slidekit が起動（PID {_text(record['pid'])}、終了済み）", True
+
+
 def _renderer_status(result: dict, limit: int) -> list[str]:
     status = result.get("status")
     label = RENDERER_LABELS.get(result.get("renderer"), _text(result.get("renderer")) or "表示ソフト")
@@ -974,6 +1266,10 @@ def _renderer_status(result: dict, limit: int) -> list[str]:
     if isinstance(holder, dict) and holder:
         lines.append(f"使用中の処理: {_holder_text(holder)}")
     pending = result.get("pending")
+    processes = _dicts(result.get("powerpoint_processes"))
+    # renderer clear --stop-owned が終了する PowerPoint（slidekit が起動したと記録で確かめることができ、ウィンドウがない）。
+    stoppable = [item for item in processes if item.get("stoppable")]
+    stop_owned = f"slidekit renderer clear --stop-owned（slidekit が起動した PowerPoint（PID {_pids(stoppable)}）を終了"
     operations = []
     if isinstance(pending, dict) and pending:
         states = {"timeout": "時間切れ", "running": "変換中", "interrupted": "中断"}
@@ -985,22 +1281,30 @@ def _renderer_status(result: dict, limit: int) -> list[str]:
         lines.append(f"残存記録: {'、'.join(parts)}")
         alive, locked = result.get("pending_process_alive"), result.get("staged_input_locked")
         running = result.get("powerpoint_running")
+        # 変換に使った PowerPoint が slidekit の起動したもので、もう動いていなければ、ほかの PowerPoint は複製を開いていない。
+        recorded, gone = "", False
+        if "powerpoint_records" in result:
+            recorded, gone = _recorded_powerpoint(result, pending)
         if alive is not None:
             lines.append(f"  作業プロセス: {'動作中' if alive else '終了'}")
+        if recorded:
+            lines.append(f"  変換に使った PowerPoint: {recorded}")
         if locked is not None:
             # PowerPoint は読み取り専用で開いた複製のファイルを開いたままにしないので、排他で開くことができても
             # 開いていないとは言えない。
             shown = (
                 "PowerPoint が開いている"
                 if locked
-                else "開いているかは確かめられない（PowerPoint が起動中）" if running else "開かれていない"
+                else "開いているかは確かめられない（PowerPoint が起動中）" if running and not gone else "開かれていない"
             )
             lines.append(f"  検査用の複製: {shown}")
         if alive:
             operations.append("変換の終了を待ち、slidekit renderer status で確かめる")
+        elif stoppable:
+            operations.append(stop_owned + "してから解除する）")
         elif locked:
             operations.append("PowerPoint で検査用の複製を閉じてから slidekit renderer clear を実行する")
-        elif running:
+        elif running and not gone:
             operations.append(
                 "PowerPoint の終了を待つか、PowerPoint が検査用の複製を開いていないことを確かめてから"
                 " slidekit renderer clear --force を実行する"
@@ -1009,8 +1313,16 @@ def _renderer_status(result: dict, limit: int) -> list[str]:
             operations.append("slidekit renderer clear")
     elif "pending" in result:
         lines.append("残存記録: なし")
+        if stoppable:
+            # 前の処理が終了させずに残した PowerPoint。後続の変換は止めないが、残り続ける。
+            lines.append(f"slidekit が起動した PowerPoint が残っている: PID {_pids(stoppable)}")
+            operations.append(stop_owned + "する）")
     if result.get("powerpoint_running") is not None:
-        lines.append(f"PowerPoint: {'起動中' if result['powerpoint_running'] else '起動していない'}")
+        count = f"（{len(processes)} 個）" if processes else ""
+        lines.append(f"PowerPoint: {'起動中' + count if result['powerpoint_running'] else '起動していない'}")
+        lines.extend(_powerpoint_process_text(item) for item in processes[:limit])
+        if len(processes) > limit:
+            lines.append(f"  ほか {len(processes) - limit} 個（--json で全件を表示）")
     if result.get("abandoned"):
         lines.append("排他: 前の処理が放さずに終了していた（slidekit が起動した PowerPoint が残っていることがある）")
     if result.get("state_dir"):
@@ -1026,6 +1338,9 @@ def _renderer_clear(result: dict, limit: int) -> list[str]:
     if result.get("reason"):
         head += f"（{result['reason']}）"
     lines = [head]
+    for item in _dicts(result.get("stopped_powerpoint")):
+        started = f"（開始 {_text(item['started_at'])}）" if item.get("started_at") else ""
+        lines.append(f"終了した PowerPoint: PID {_text(item.get('pid'))}{started}")
     if result.get("archived"):
         lines.append(f"退避先: {result['archived']}")
     if result.get("removed_work_dir"):
@@ -1057,6 +1372,16 @@ def _paths_text(item: dict) -> str:
     )
     if not paths:
         return ""
+    kinds = item.get("kinds") if isinstance(item.get("kinds"), dict) else None
+    if kinds:
+        # 変わった入力の種類ごとに、最初のファイルと件数を示す（どの入力が変わったかを推測しなくてよいように）。
+        parts = []
+        for kind, entry in kinds.items():
+            entry = entry if isinstance(entry, dict) else {}
+            first = Path(_text(entry.get("first"))).name if entry.get("first") else ""
+            number = entry.get("count") if _integer(entry.get("count")) else 1
+            parts.append(f"{_text(kind)}: {first}" + (f" ほか {number - 1} 件" if number > 1 else ""))
+        return "（" + "、".join(parts) + "）"
     count = item.get("count") if _integer(item.get("count")) else len(paths)
     return f"（{paths[0]}" + (f" ほか {count - 1} 件" if count > 1 else "") + "）"
 
@@ -1077,6 +1402,28 @@ def _listed_ids(values: list, limit: int = 5) -> str:
 
 def _status_operation(run: Any) -> str:
     return f"slidekit review status --build {_argument(run)}" if run else "slidekit review status"
+
+
+def _pending_reasons(pending: list) -> str:
+    """未確認のページを、引き継げなかった理由ごとに「。本文の変更 p.3,5、元資料の変更 p.6-7（proofs）」の形で示す。"""
+    grouped: dict[str, list] = {}
+    documents: dict[str, list[str]] = {}
+    for item in pending:
+        if not isinstance(item, dict) or not item.get("reason"):
+            continue
+        reason = _text(item["reason"])
+        grouped.setdefault(reason, []).append(
+            item.get("number") if _integer(item.get("number")) else item.get("slide_id")
+        )
+        for name in item.get("documents") or []:
+            if _text(name) not in documents.setdefault(reason, []):
+                documents[reason].append(_text(name))
+    parts = []
+    for reason, pages in grouped.items():
+        numbers = [page for page in pages if _integer(page)]
+        listed = f"p.{format_numbers(numbers)}" if len(numbers) == len(pages) else _listed_ids(pages)
+        parts.append(f"{reason} {listed}" + (f"（{'、'.join(documents[reason])}）" if documents.get(reason) else ""))
+    return "。" + "、".join(parts) if parts else ""
 
 
 def _review_status(result: dict, limit: int) -> list[str]:
@@ -1140,7 +1487,7 @@ def _review_status(result: dict, limit: int) -> list[str]:
             pages = group.get("slides") or _listed_ids(
                 [item.get("slide_id") for item in pending if isinstance(item, dict)]
             )
-            lines.append(f"    {name} {pages}（{len(pending)} ページ）")
+            lines.append(f"    {name} {pages}（{len(pending)} ページ{_pending_reasons(pending)}）")
     if pending_warnings:
         lines.append("  未対応の警告:")
         for warning in pending_warnings[:limit]:
@@ -1189,7 +1536,30 @@ def _review_record(result: dict, limit: int) -> list[str]:
             f"  {_group_name(kind, renderer or None, variant or None)} {len(values)} 件"
             + (f"（{_listed_ids(pages)}）" if pages else "")
         )
-    return lines + _notice_lines(result.get("notices")) + _next([_status_operation(run)])
+    remaining = result.get("remaining") if isinstance(result.get("remaining"), dict) else None
+    operation = _status_operation(run)
+    if remaining is not None:
+        lines.append(f"残り: {_remaining_text(remaining) or 'なし'}")
+        if not any(remaining.get(key) for key, _ in _REMAINING_NAMES):
+            operation = f"slidekit export --build {_argument(run)}" if run else "slidekit export"
+    return lines + _notice_lines(result.get("notices")) + _next([operation])
+
+
+def _review_sheet(result: dict, limit: int) -> list[str]:
+    sheets = [item for item in result.get("sheets") or [] if isinstance(item, str)]
+    run = _run_of(result)
+    changes = result.get("changes") if isinstance(result.get("changes"), dict) else {}
+    counts: dict[str, int] = {}
+    for value in changes.values():
+        counts[_text(value)] = counts.get(_text(value), 0) + 1
+    names = {"unchanged": "変更なし", "renumbered": "ページ番号だけ変わった", "changed": "変わった", "added": "新しい"}
+    lines = [f"比較画像: {len(sheets)} 枚（{len(result.get('slides') or [])} ページ）"]
+    if result.get("compared_run"):
+        detail = "、".join(f"{names.get(key, key)} {count}" for key, count in counts.items())
+        lines.append(f"  前の実行 {_text(result['compared_run'])} と比較" + (f"（{detail}）" if detail else ""))
+    lines.extend(f"  {_shown(path)}" for path in sheets)
+    lines.append("  比較画像は確認を助ける表示で、確認の記録ではない。ページ画像を開いて確かめてから記録する")
+    return lines + _next([_status_operation(run)])
 
 
 def _review_accept(result: dict, limit: int) -> list[str]:
@@ -1304,8 +1674,68 @@ def _command_failure(result: dict, limit: int, command: Any = None) -> list[str]
     return lines
 
 
+def _measure(result: dict, limit: int) -> list[str]:
+    results = _issues(result.get("results"))
+    width = result.get("width_pt")
+    notes = [f"幅 {width:.1f} pt" if _number(width) else "折り返さない"]
+    if result.get("role"):
+        notes.append(f"役割 {_text(result['role'])}")
+    if _number(result.get("size_pt")):
+        notes.append(f"{result['size_pt']:g} pt")
+    lines = [f"計測: {len(results)} 件（{'、'.join(notes)}）"]
+    for number, item in enumerate(results, 1):
+        rows = _issues(item.get("lines"))
+        height = item.get("frame_height_pt")
+        head = f"  {number}: {len(rows)} 行" + (f"、枠の高さ {height:.1f} pt" if _number(height) else "")
+        single = item.get("single_line_frame_width_pt")
+        if len(rows) > 1 and _number(single):
+            head += f"（1 行に収める枠の幅 {single:.1f} pt）"
+        elif not _number(width) and _number(item.get("frame_width_pt")):
+            head += f"、枠の幅 {item['frame_width_pt']:.1f} pt"
+        lines.append(head)
+        lines.extend(_wrap_rows(rows, "    "))
+    return lines
+
+
+_WRAP_MARKS = {"mid_phrase": " ← 文節の途中", "hyphen": " ← ハイフンの後", "split": " ← 語の途中"}
+
+
+def _wrap_rows(rows: list[dict], indent: str) -> list[str]:
+    """行の文字列と幅。自動の折り返しの位置の注意（文節の途中など）を行の末尾に添える。"""
+    lines = []
+    for row in rows:
+        width = row.get("width_pt")
+        text = f"{indent}「{_text(row.get('text')).rstrip()}」" + (f" {width:.1f} pt" if _number(width) else "")
+        lines.append(text + _WRAP_MARKS.get(row.get("wrap"), ""))
+    return lines
+
+
+def _wrap_listing(result: dict) -> list[str]:
+    """layout --wraps：自動で折り返した要素（テーマの要素を除く）の行の文字列と幅。"""
+    layout = result.get("layout") if isinstance(result.get("layout"), dict) else {}
+    lines = []
+    for slide in _issues(layout.get("slides")):
+        page = f"p.{slide['number']}" if _integer(slide.get("number")) else f"ページ {_text(slide.get('id'))}"
+        for element in _issues(slide.get("elements")):
+            rows = _issues(element.get("lines"))
+            if str(element.get("id", "")).startswith("_theme/"):
+                continue
+            if not any(row.get("wrap") for row in rows):
+                continue
+            inner = element.get("inner_pt")
+            width = (
+                f"（内側の幅 {inner[2]:.1f} pt）"
+                if isinstance(inner, list) and len(inner) == 4 and _number(inner[2])
+                else ""
+            )
+            lines.append(f"  {page} {_text(element.get('id'))}{width}")
+            lines.extend(_wrap_rows(rows, "    "))
+    return ["自動で折り返した要素:", *lines] if lines else ["自動で折り返した要素: なし"]
+
+
 _SUMMARIES = {
     "layout": _layout,
+    "measure": _measure,
     "doctor": _doctor,
     "build": _build,
     "check": _check,
@@ -1316,6 +1746,7 @@ _SUMMARIES = {
     "review status": _review_status,
     "review record": _review_record,
     "review accept": _review_accept,
+    "review sheet": _review_sheet,
     "review revoke": _review_revoke,
     "review carry": _review_carry,
 }

@@ -632,7 +632,7 @@ def math_lines(deck):
 # 行の上側を数式で決める規則の境目。計測は、分数・伸びる括弧・大型演算子・下に置くものを含み（添字の中と上下に置くものの
 # 中を除く）、インクの上下の和が文字サイズを超える式の行を、背の高い数式の規則（measure._math_line）で置く。和が 1.3 em 以上の
 # 式と下に置くものを含む式はインクの上下と行間から上側と下側を決め、ほかの 1.0〜1.3 em の式は上側を 1.2 × インクの上 × 行間に
-# する。文中の背の高い根号は根号の規則で置き、それ以外の背の高い式は、数式の計測の上下に行間を掛ける。
+# する。文中の背の高い根号は根号の規則で置き、それ以外は通常の数式の行の規則（measure._math_line）で置く。
 STACK_DISPLAY = [MATH_ONLY[1], MATH_ONLY[3], MATH_ONLY[4]]  # 分数・総和・伸びる括弧の中の分数
 STACK_INLINE = [
     ("script_fraction", r"a^{\frac{a}{c}}"),  # 添字の中の分数（インクの上下の和は 1 em を少し超える）
@@ -1090,6 +1090,120 @@ def math_text_spacing(deck):
     )
 
 
+SCRIPT_FRACTIONS = (("quarter", "m^{1/4}"), ("ceiling", r"2^{\lceil a/2\rceil}"))
+
+
+def math_script_lines(deck):
+    page = Page(
+        deck,
+        "math_script_lines",
+        "上付きの分数の行",
+        "上付きの横分数・斜線・上下の分数を、12・20・32 pt、行間 1.0・1.2 で比べる。"
+        "通常文字の角括弧を目印にして、基線は 0.5 pt の許容差で照合する。",
+    )
+    expressions = (*SCRIPT_FRACTIONS, ("slash", r"m^{1\slash4}"), ("stack", r"x^{\frac{a}{b}}"))
+    for size in (12, 20, 32):
+        for spacing in (1.0, 1.2):
+            for name, expression in expressions:
+                page.text(
+                    f"{name}_s{size}_sp{round(spacing * 100)}",
+                    [Text("["), Math(expression), Text("]")],
+                    page.place(146, 112),
+                    size_pt=size,
+                    line_spacing=spacing,
+                    word_wrap=False,
+                    tag=("c4", "text_baseline"),
+                )
+
+
+def math_script_spacing(deck):
+    page = Page(
+        deck,
+        "math_script_spacing",
+        "上付きの横分数の行間と揃え",
+        "20 pt の上付きの横分数を、行間 1.15・1.5、上・中・下揃えで置く。12・20・32 pt の和文の中の行も比べる。",
+    )
+    for name, expression in SCRIPT_FRACTIONS:
+        for spacing in (1.15, 1.5):
+            for valign in ("top", "middle", "bottom"):
+                page.text(
+                    f"{name}_sp{round(spacing * 100)}_{valign}",
+                    [Text("["), Math(expression), Text("]")],
+                    page.place(300, 60),
+                    line_spacing=spacing,
+                    valign=valign,
+                    word_wrap=False,
+                    tag=("c4", "text_baseline"),
+                )
+    for size in (12, 20, 32):
+        for name, expression in SCRIPT_FRACTIONS:
+            page.text(
+                f"{name}_s{size}_japanese",
+                [Text("値は "), Math(expression), Text(" です。")],
+                page.place(300, 60),
+                size_pt=size,
+                line_spacing=1.2,
+                word_wrap=False,
+                tag=("c4", "text_baseline"),
+            )
+
+
+def math_script_multiline(deck):
+    page = Page(
+        deck,
+        "math_script_multiline",
+        "上付きの横分数を含む複数行",
+        "12・20・32 pt、行間 1.5 の 3 行の中央に上付きの横分数を置き、前後の行への行送りを比べる。",
+    )
+    for size in (12, 20, 32):
+        for name, expression in SCRIPT_FRACTIONS:
+            page.text(
+                f"{name}_s{size}",
+                [Text("First line\nValue ["), Math(expression), Text("]\nLast line")],
+                page.place(300, 200),
+                size_pt=size,
+                line_spacing=1.5,
+                word_wrap=False,
+                tag=("c4", "text_baseline"),
+            )
+
+
+def math_nested(deck):
+    page = Page(
+        deck,
+        "math_nested",
+        "入れ子の分数と伸びる括弧",
+        "高い式と上下に偏る式を囲む括弧、独立した式の入れ子の分数を比べる。枠には描画範囲の上下に余裕を持たせる。",
+    )
+    expressions = (
+        ("numerator", r"\frac{\frac{a}{b}}{c}"),
+        ("denominator", r"\frac{a}{\frac{b}{c}}"),
+        ("fenced_numerator", r"\left(\frac{\frac{a}{b}}{c}\right)"),
+        ("fenced_denominator", r"\left(\frac{a}{\frac{b}{c}}\right)"),
+        ("fenced_root", r"\left(\sqrt{\frac{a}{b}}\right)"),
+        ("fenced_sum", r"\left(\sum_{i=1}^{n} a_i\right)"),
+        ("bracket_numerator", r"\left[\frac{\frac{a}{b}}{c}\right]"),
+        ("deep_denominator", r"\left(\frac{x}{y^2}\right)"),
+    )
+    for name, expression in expressions:
+        for mode in ("inline", "display"):
+            area = page.place(224, 112)
+            if mode == "display":
+                page.equation(
+                    f"{mode}_{name}", expression, area, size_pt=20, line_spacing=1.2, tag=("c4", "math_nested")
+                )
+            else:
+                page.text(
+                    f"{mode}_{name}",
+                    [Text("["), Math(expression), Text("]")],
+                    area,
+                    size_pt=20,
+                    line_spacing=1.2,
+                    word_wrap=False,
+                    tag=("c4", "math_nested"),
+                )
+
+
 ALIGN_TEXT = "揃えの確認に使う文です。Align the lines of this paragraph in different ways."
 BAND_TEXTS = (("ja", "誤差の幅を確かめる短い文"), ("latin", "Check the narrow band"))
 
@@ -1271,6 +1385,10 @@ def build(context):
     math_limits(deck)
     math_text_lines(deck)
     math_text_spacing(deck)
+    math_script_lines(deck)
+    math_script_spacing(deck)
+    math_script_multiline(deck)
+    math_nested(deck)
     align(deck, ruler)
     fonts(deck)
     tables(deck)

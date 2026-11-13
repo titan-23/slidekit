@@ -7,6 +7,9 @@
 数式を含む行はさらに数式 1 つあたり、数式の照合の基準の最大の幅の差（`slidekit.math.metrics.REFERENCE_LIMITS` の
 width_max_em。1.5 pt を下限とする）を加える。基線は 0.5 pt、数式を含む行の基線は基準の上下の差（vertical_em。下限 1.5 pt）。
 インクの横の端は、その端を決める行の幅の許容幅と同じにする。インクの上下は 0.6 pt、数式を含む要素は数式の基準の上下の差。
+照合ケースごとに厳しく比べる項目（基線・行の幅と左端・インクの左右・インクの上下）と許容差は、タグか要素で選ぶ規則として
+tests/data/layout/tolerances.toml に根拠とともに書く（例：タグ text_baseline の通常文字を目印にした数式の行は、
+数式の構造によらず基線を 0.5 pt で比べる）。規則で許容差を決めた項目の違いの文言には、規則の名前を添える。
 分数のように数式の字形が複数の基線に並ぶ行は、基線を比べない。数式の行の範囲には、PDF の読み取りが数式の線
 （根号の記号など）を描画の範囲で含める。そこで、行の端の数式が線で描く記号（伸びる括弧・根号の記号）で始まるか終わるときは、
 予測の行の範囲のその端を、数式の描画範囲の端（slidekit.math.metrics の Box.ink）にする（字形の端は送り幅のまま）。
@@ -23,6 +26,9 @@ PDF の読み取りは空白の字形を除くので、予測の行の範囲と�
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
+import functools
 import importlib.util
 import json
 import math
@@ -31,6 +37,7 @@ from pathlib import Path
 import re
 import shutil
 import sys
+import tomllib
 import types
 
 from pdf_tools import Document, text_length
@@ -52,6 +59,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "tests" / "data" / "layout"
 DECK = DATA / "deck"
 DEFAULT_FIXTURE = DATA / "powerpoint_layout.json"
+TOLERANCES = DATA / "tolerances.toml"
 FIXTURE_VARIABLE = "SLIDEKIT_LAYOUT_FIXTURE"
 TOOL = ROOT / "tools" / "make_layout_fixture.py"
 MATH_TOOL = ROOT / "tests" / "tools" / "powerpoint_math_data.py"
@@ -73,6 +81,10 @@ PAGES = (
     "math_limits",
     "math_text_lines",
     "math_text_spacing",
+    "math_script_lines",
+    "math_script_spacing",
+    "math_script_multiline",
+    "math_nested",
     "align",
     "fonts",
     "tables",
@@ -89,6 +101,8 @@ MATH_PT = 1.5  # 数式を含む行とインクの許容幅の下限
 MATH_WIDTH_EM = REFERENCE_LIMITS["width_max_em"]  # 数式 1 つあたりの幅の許容幅（数式の照合の基準と同じ）
 MATH_VERTICAL_EM = REFERENCE_LIMITS["vertical_em"]  # 数式を含む行の基線とインクの上下の許容幅（同）
 CHECKS = ("lines", "baselines", "extents", "ink", "fonts")
+# 規則で許容差を決めることができる項目（基線、行の幅と左端、インクの左右の端、インクの上下の端）。
+RULE_ITEMS = ("baseline", "width", "ink_x", "ink_y")
 # 数式の字形が複数の基線に並ぶ構造（PDF から読む行の基線が、式の基線にならない）。
 STACKED = re.compile(
     r"\\(?:[dtc]?frac|[dt]?binom|genfrac|over|atop|choose|overset|underset|stackrel|substack)(?![A-Za-z])"
@@ -106,6 +120,138 @@ def load_tool(path: Path = TOOL):
         sys.modules[name] = module
         spec.loader.exec_module(module)
     return sys.modules[name]
+
+
+# ---- 照合ケースごとの許容差の規則（tests/data/layout/tolerances.toml） ----
+
+
+@dataclass(frozen=True)
+class Tolerance:
+    """規則が決める 1 項目の許容差。tolerance_pt と tolerance_em × 文字サイズの大きいほうにする。"""
+
+    rule: str  # 規則の名前（違いの文言に添える）
+    tolerance_pt: float = 0.0
+    tolerance_em: float = 0.0
+    stacked: bool = False  # baseline だけ：数式の字形が複数の基線に並ぶ行も比べる
+
+    def value(self, size: float) -> float:
+        return max(self.tolerance_pt, self.tolerance_em * size)
+
+
+@dataclass(frozen=True)
+class Rule:
+    """タグか要素で選ぶ照合ケースの、項目ごとの許容差と根拠。"""
+
+    tags: tuple[str, ...]
+    elements: tuple[str, ...]
+    items: Mapping[str, Tolerance]
+    reason: str
+
+    @property
+    def name(self) -> str:
+        return " ".join((*self.tags, *self.elements))
+
+    def matches(self, case: Mapping) -> bool:
+        tags = set(case.get("tags") or ())
+        element = f"{case.get('slide_id')}/{case.get('element_id')}"
+        return set(self.tags) <= tags and (not self.elements or element in self.elements)
+
+
+def _positive(value, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{label} は正の有限の数にする: {value!r}")
+    return float(value)
+
+
+def _strings(value, label: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
+        raise ValueError(f"{label} は空でない文字列の配列にする: {value!r}")
+    return tuple(value)
+
+
+def parse_rules(data: Mapping, source: str = "許容差の規則") -> tuple[Rule, ...]:
+    """許容差の規則（tolerances.toml の内容）を読む。形が違えば ValueError。"""
+    if not isinstance(data, Mapping) or data.get("schema_version") != 1:
+        raise ValueError(f"{source}: schema_version = 1 にする")
+    unknown = set(data) - {"schema_version", "rules"}
+    if unknown or not isinstance(data.get("rules", []), list):
+        raise ValueError(f"{source}: 未対応の設定 {sorted(unknown)}（rules は表の配列にする）")
+    rules = []
+    for number, entry in enumerate(data.get("rules", []), 1):
+        label = f"{source} の rules[{number}]"
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"{label} は表にする")
+        unknown = set(entry) - {"tags", "elements", "reason", *RULE_ITEMS}
+        if unknown:
+            raise ValueError(f"{label}: 未対応の項目 {sorted(unknown)}（項目は {', '.join(RULE_ITEMS)}）")
+        tags = _strings(entry.get("tags", []), f"{label} の tags")
+        elements = _strings(entry.get("elements", []), f"{label} の elements")
+        if not tags and not elements:
+            raise ValueError(f"{label}: ケースを tags か elements で選ぶ")
+        if any("/" not in element for element in elements):
+            raise ValueError(f"{label}: elements は「ページの識別子/要素の識別子」にする: {list(elements)}")
+        reason = entry.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"{label}: reason に許容差を決めた根拠を書く")
+        name = " ".join((*tags, *elements))
+        items = {}
+        for item in RULE_ITEMS:
+            if item not in entry:
+                continue
+            spec = entry[item]
+            keys = {"tolerance_pt", "tolerance_em", *(("stacked",) if item == "baseline" else ())}
+            if not isinstance(spec, Mapping) or set(spec) - keys or not {"tolerance_pt", "tolerance_em"} & set(spec):
+                raise ValueError(
+                    f"{label} の {item}: tolerance_pt か tolerance_em を持つ表にする（使える鍵 {sorted(keys)}）"
+                )
+            stacked = spec.get("stacked", False)
+            if not isinstance(stacked, bool):
+                raise ValueError(f"{label} の {item}.stacked は真偽値にする: {stacked!r}")
+            items[item] = Tolerance(
+                rule=name,
+                stacked=stacked,
+                **{
+                    key: _positive(spec[key], f"{label} の {item}.{key}")
+                    for key in ("tolerance_pt", "tolerance_em")
+                    if key in spec
+                },
+            )
+        if not items:
+            raise ValueError(f"{label}: 項目（{', '.join(RULE_ITEMS)}）を 1 つ以上書く")
+        rules.append(Rule(tags=tags, elements=elements, items=items, reason=reason.strip()))
+    return tuple(rules)
+
+
+def load_rules(path: Path = TOLERANCES) -> tuple[Rule, ...]:
+    """許容差の規則のファイルを読む。ファイルがなければ規則なし。"""
+    path = Path(path)
+    if not path.is_file():
+        return ()
+    return _load_rules(path, path.stat().st_mtime_ns)
+
+
+@functools.lru_cache(maxsize=8)
+def _load_rules(path: Path, _mtime: int) -> tuple[Rule, ...]:
+    with path.open("rb") as stream:
+        return parse_rules(tomllib.load(stream), path.name)
+
+
+def case_tolerances(case: Mapping, rules) -> dict[str, Tolerance]:
+    """照合ケースに合う規則の、項目ごとの許容差。複数の規則が同じ項目を決めると ValueError。"""
+    result: dict[str, Tolerance] = {}
+    for rule in rules:
+        if not rule.matches(case):
+            continue
+        for item, tolerance in rule.items.items():
+            if item in result:
+                raise ValueError(f"許容差の規則が重なる: {item} を「{result[item].rule}」と「{rule.name}」が決める")
+            result[item] = tolerance
+    return result
+
+
+def _allowed(tolerance: float, rule: Tolerance | None) -> str:
+    """違いの文言の許容差（規則で決めたときは規則の名前を添える）。"""
+    return f"許容 {tolerance:.2f}" + (f"、規則 {rule.rule}" if rule is not None else "")
 
 
 # ---- 比べる処理（test_powerpoint_layout.py も使う） ----
@@ -288,8 +434,11 @@ def _predicted_fonts(element, fonts) -> dict[str, set[str]]:
     return result
 
 
-def _extent_tolerance(line, size) -> float:
-    """行の幅と左端の許容幅（pt）。文字の分に、数式を含む行は数式 1 つあたりの数式の許容幅を加える。"""
+def _extent_tolerance(line, size, rule: Tolerance | None = None) -> float:
+    """行の幅と左端の許容幅（pt）。文字の分に、数式を含む行は数式 1 つあたりの数式の許容幅を加える。
+    規則（width）があれば、その許容差にする。"""
+    if rule is not None:
+        return rule.value(size)
     tolerance = TEXT_WIDTH_EM_PER_CHAR * size * line["characters"] + TEXT_WIDTH_PT
     return tolerance + line["formulas"] * max(MATH_PT, MATH_WIDTH_EM * size)
 
@@ -299,8 +448,12 @@ def _math_vertical(size) -> float:
     return max(MATH_PT, MATH_VERTICAL_EM * size)
 
 
-def _differences(element, layout, actual, fonts, checks) -> tuple[list[str], list[str]]:
-    """（配置の違い、書体の違い）。行数が違うときは、行の位置とインクを比べない。書体は行に依らないので比べる。"""
+def _differences(element, layout, actual, fonts, checks, *, rules=None) -> tuple[list[str], list[str]]:
+    """（配置の違い、書体の違い）。行数が違うときは、行の位置とインクを比べない。書体は行に依らないので比べる。
+
+    rules は項目から規則の許容差（`Tolerance`）への対応（`case_tolerances`）で、書いた項目はその許容差で比べる。
+    """
+    rules = rules or {}
     if not actual.get("glyphs"):
         return ["PDF に字形がない"], []
     typefaces = _font_differences(element, actual, fonts) if "fonts" in checks else []
@@ -317,35 +470,40 @@ def _differences(element, layout, actual, fonts, checks) -> tuple[list[str], lis
         ], typefaces
     problems = []
     size = _size(element)
+    baseline_rule, width_rule = rules.get("baseline"), rules.get("width")
     for number, (line, baseline, (left, right)) in enumerate(
         zip(lines, actual["baselines_pt"], actual["line_extents_pt"]), 1
     ):
-        if "baselines" in checks and not line["stacked"]:
-            tolerance = _math_vertical(size) if line["math"] else BASELINE_PT
+        if "baselines" in checks and (not line["stacked"] or (baseline_rule is not None and baseline_rule.stacked)):
+            if baseline_rule is not None:
+                tolerance = baseline_rule.value(size)
+            else:
+                tolerance = _math_vertical(size) if line["math"] else BASELINE_PT
             if abs(baseline - line["baseline"]) > tolerance:
                 problems.append(
                     f"{number} 行目の基線: 予測 {line['baseline']:.2f}、実際 {baseline:.2f}"
-                    f"（差 {baseline - line['baseline']:+.2f}、許容 {tolerance:.2f}）"
+                    f"（差 {baseline - line['baseline']:+.2f}、{_allowed(tolerance, baseline_rule)}）"
                 )
         if "extents" in checks:
-            tolerance = _extent_tolerance(line, size)
+            tolerance = _extent_tolerance(line, size, width_rule)
             width, expected = right - left, line["right"] - line["left"]
             if abs(width - expected) > tolerance:
                 problems.append(
                     f"{number} 行目の幅: 予測 {expected:.2f}、実際 {width:.2f}"
-                    f"（差 {width - expected:+.2f}、許容 {tolerance:.2f}）"
+                    f"（差 {width - expected:+.2f}、{_allowed(tolerance, width_rule)}）"
                 )
             if abs(left - line["left"]) > tolerance:
                 problems.append(
                     f"{number} 行目の左端: 予測 {line['left']:.2f}、実際 {left:.2f}"
-                    f"（差 {left - line['left']:+.2f}、許容 {tolerance:.2f}）"
+                    f"（差 {left - line['left']:+.2f}、{_allowed(tolerance, width_rule)}）"
                 )
     if "ink" in checks:
-        problems += _ink_differences(element, layout, actual, lines)
+        problems += _ink_differences(element, layout, actual, lines, rules)
     return problems, typefaces
 
 
-def _ink_differences(element, layout, actual, lines) -> list[str]:
+def _ink_differences(element, layout, actual, lines, rules=None) -> list[str]:
+    rules = rules or {}
     ink = layout.ink
     if ink is None or actual.get("ink_pt") is None:
         if (ink is None) != (actual.get("ink_pt") is None):
@@ -353,7 +511,9 @@ def _ink_differences(element, layout, actual, lines) -> list[str]:
         return []
     has_math = any(fragment.get("kind") == "math" for fragment in element.get("content") or [])
     size = _size(element)
-    vertical = _math_vertical(size) if has_math else INK_PT
+    default = _math_vertical(size) if has_math else INK_PT
+    ink_x, ink_y, width_rule = rules.get("ink_x"), rules.get("ink_y"), rules.get("width")
+    vertical = default if ink_y is None else ink_y.value(size)
     # 計測のインクの横の範囲はインクのある行の範囲である。行の範囲と同じく、行頭と行末の空白を除く。
     # 横の端の許容幅は、その端を決める行の幅の許容幅と同じにする（PowerPoint の行の幅の差がそのまま端に出る）。
     inked = [line for line in lines if line["inked"]]
@@ -361,15 +521,19 @@ def _ink_differences(element, layout, actual, lines) -> list[str]:
         first = min(inked, key=lambda line: line["left"])
         last = max(inked, key=lambda line: line["right"])
         left, right = first["left"], last["right"]
-        horizontal = (_extent_tolerance(first, size), _extent_tolerance(last, size))
+        horizontal = (_extent_tolerance(first, size, width_rule), _extent_tolerance(last, size, width_rule))
+        horizontal_rule = width_rule
     else:
         left, right = ink.x, ink.x + ink.w
-        horizontal = (vertical, vertical)
+        horizontal, horizontal_rule = (default, default), None
+    if ink_x is not None:
+        horizontal, horizontal_rule = (ink_x.value(size),) * 2, ink_x
     expected = (left, ink.y, right, ink.y + ink.h)
     tolerances = (horizontal[0], vertical, horizontal[1], vertical)
+    sources = (horizontal_rule, ink_y, horizontal_rule, ink_y)
     return [
-        f"インクの{edge}: 予測 {a:.2f}、実際 {b:.2f}（差 {b - a:+.2f}、許容 {tolerance:.2f}）"
-        for edge, a, b, tolerance in zip(_EDGES, expected, actual["ink_pt"], tolerances)
+        f"インクの{edge}: 予測 {a:.2f}、実際 {b:.2f}（差 {b - a:+.2f}、{_allowed(tolerance, rule)}）"
+        for edge, a, b, tolerance, rule in zip(_EDGES, expected, actual["ink_pt"], tolerances, sources)
         if abs(b - a) > tolerance
     ]
 
@@ -393,8 +557,11 @@ def _font_differences(element, actual, fonts) -> list[str]:
     return problems
 
 
-def compare_case(case, fonts, *, checks=CHECKS) -> list[str]:
-    """照合データの 1 要素を計測と比べ、違いの文言（要素の識別子・タグ・予測と実際の値を含む）を返す。違いがなければ空。"""
+def compare_case(case, fonts, *, checks=CHECKS, rules=None) -> list[str]:
+    """照合データの 1 要素を計測と比べ、違いの文言（要素の識別子・タグ・予測と実際の値を含む）を返す。違いがなければ空。
+
+    rules は許容差の規則（`Rule` の列）で、省略すると tests/data/layout/tolerances.toml を使う。
+    """
     tags = list(case.get("tags") or ())
     label = f"{case.get('slide_id')}/{case.get('element_id')} [{' '.join(tags)}]"
     try:
@@ -402,7 +569,8 @@ def compare_case(case, fonts, *, checks=CHECKS) -> list[str]:
     except measure.MeasureError as error:
         return [f"{label}: 計測できない: {error}"]
     try:
-        placement, typefaces = _differences(case["element"], layout, case["actual"], fonts, checks)
+        tolerances = case_tolerances(case, load_rules() if rules is None else rules)
+        placement, typefaces = _differences(case["element"], layout, case["actual"], fonts, checks, rules=tolerances)
     except ValueError as error:
         return [f"{label}: {error}"]
     if placement and "overflow" in tags:
@@ -530,6 +698,113 @@ def test_comparison_accepts_layout_that_matches_measurement():
         element([text("Sum "), math_fragment("x+1")], area=(10, 20, 300, 60), valign="middle"),
     ):
         assert compare_case(case(value, actual_from_prediction(value, fonts)), fonts) == []
+
+
+@pytest.mark.parametrize("expression", ["m^{1/4}", r"x^{\frac{a}{b}}"])
+def test_text_markers_check_math_baseline_with_text_tolerance(expression):
+    fonts = FakeFonts()
+    value = element([text("["), math_fragment(expression), text("]")])
+    actual = actual_from_prediction(value, fonts)
+    actual["baselines_pt"][0] += 0.8
+    assert compare_case(case(value, actual), fonts, checks=("baselines",)) == []
+    differences = compare_case(case(value, actual, "text_baseline"), fonts, checks=("baselines",))
+    assert len(differences) == 1 and "許容 0.50、規則 text_baseline" in differences[0]
+
+
+def rules(*entries):
+    return parse_rules({"schema_version": 1, "rules": [{"reason": "試験", **entry} for entry in entries]})
+
+
+def test_tolerance_rules_override_selected_items():
+    """規則は書いた項目だけの許容差を決める。インクの左右は、ink_x がなければ行の幅（width）の許容差に従う。"""
+    fonts = FakeFonts()
+    value = element([text("a" * 40)], area=(10, 20, 500, 60))  # 通常の幅の許容差は 3.1 pt
+    actual = actual_from_prediction(value, fonts)
+    actual["line_extents_pt"][0][1] += 1.0
+    actual["ink_pt"][2] += 1.0
+    actual["ink_pt"][3] += 0.5
+    strict = case(value, actual, "strict")
+    assert compare_case(strict, fonts, rules=()) == []
+    width, ink = compare_case(strict, fonts, rules=rules({"tags": ["strict"], "width": {"tolerance_pt": 0.5}}))
+    assert "1 行目の幅" in width and "（差 +1.00、許容 0.50、規則 strict）" in width
+    assert "インクの右端" in ink and "許容 0.50、規則 strict" in ink
+    # ink_x と ink_y は、インクの左右と上下の許容差を別に決める。tolerance_em は要素の最大の文字サイズの em。
+    both = rules(
+        {"tags": ["strict"], "width": {"tolerance_pt": 0.5}, "ink_x": {"tolerance_pt": 2.0}},
+        {"tags": ["strict"], "ink_y": {"tolerance_em": 0.02, "tolerance_pt": 0.1}},
+    )
+    width, bottom = compare_case(strict, fonts, rules=both)
+    assert "1 行目の幅" in width and "インクの下端" in bottom and "（差 +0.50、許容 0.40、規則 strict）" in bottom
+    # 要素で選ぶ規則。tags と elements の両方を書くと、両方に合うケースだけを選ぶ。
+    narrow = {"width": {"tolerance_pt": 0.5}}
+    assert compare_case(strict, fonts, rules=rules({"elements": ["page/other"], **narrow})) == []
+    assert len(compare_case(strict, fonts, rules=rules({"elements": ["page/sample"], **narrow}))) == 2
+    assert compare_case(strict, fonts, rules=rules({"tags": ["other"], "elements": ["page/sample"], **narrow})) == []
+
+
+def test_tolerance_rule_compares_stacked_baselines_when_asked():
+    fonts = FakeFonts()
+    value = element([math_fragment(r"\frac{a}{b}")], kind="equation", area=(10, 20, 200, 80))
+    actual = actual_from_prediction(value, fonts)
+    actual["baselines_pt"][0] += 0.8
+    stacked = case(value, actual, "nested")
+    plain = rules({"tags": ["nested"], "baseline": {"tolerance_pt": 0.5}})
+    assert compare_case(stacked, fonts, checks=("baselines",), rules=plain) == []  # 分数の行の基線は比べない
+    strict = rules({"tags": ["nested"], "baseline": {"tolerance_pt": 0.5, "stacked": True}})
+    (message,) = compare_case(stacked, fonts, checks=("baselines",), rules=strict)
+    assert "1 行目の基線" in message and "許容 0.50、規則 nested" in message
+
+
+def test_overlapping_tolerance_rules_are_reported():
+    fonts = FakeFonts()
+    value = element([text("Hello")])
+    overlapping = rules(
+        {"tags": ["a"], "baseline": {"tolerance_pt": 0.5}},
+        {"elements": ["page/sample"], "baseline": {"tolerance_pt": 1}},
+    )
+    (message,) = compare_case(case(value, actual_from_prediction(value, fonts), "a"), fonts, rules=overlapping)
+    assert "許容差の規則が重なる: baseline を「a」と「page/sample」が決める" in message
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"rules": []},
+        {"schema_version": 1, "rules": [{"tags": ["a"], "baseline": {"tolerance_pt": 0.5}}]},  # reason がない
+        {"schema_version": 1, "rules": [{"reason": "r", "baseline": {"tolerance_pt": 0.5}}]},  # 選ぶ条件がない
+        {"schema_version": 1, "rules": [{"reason": "r", "tags": ["a"]}]},  # 項目がない
+        {"schema_version": 1, "rules": [{"reason": "r", "tags": ["a"], "height": {"tolerance_pt": 1}}]},
+        {"schema_version": 1, "rules": [{"reason": "r", "tags": ["a"], "baseline": {"tolerance_pt": 0}}]},
+        {"schema_version": 1, "rules": [{"reason": "r", "tags": ["a"], "baseline": {"stacked": True}}]},
+        {"schema_version": 1, "rules": [{"reason": "r", "tags": ["a"], "width": {"tolerance_pt": 1, "stacked": True}}]},
+        {"schema_version": 1, "rules": [{"reason": "r", "elements": ["sample"], "width": {"tolerance_pt": 1}}]},
+        {"schema_version": 1, "rules": [{"reason": "r", "tags": "a", "width": {"tolerance_pt": 1}}]},
+        {"schema_version": 1, "cases": []},
+    ],
+)
+def test_tolerance_rules_reject_malformed_data(data):
+    with pytest.raises(ValueError):
+        parse_rules(data)
+
+
+def test_stored_tolerance_rules_select_calibration_cases(tmp_path):
+    """保存した規則は根拠を持ち、どれも校正用の資料の要素を選ぶ。text_baseline の規則は、以前の試験の特例
+    （数式の構造によらず基線を 0.5 pt で比べる）と同じ。"""
+    stored = load_rules()
+    assert stored and all(rule.reason for rule in stored)
+    tool = load_tool()
+    _project, scene = calibration_scene(tmp_path)
+    cases = [
+        {"slide_id": slide["id"], "element_id": value["id"], "tags": tool.case_tags(slide, value)}
+        for slide in scene["slides"]
+        for value in tool.text_elements(slide)
+    ]
+    for rule in stored:
+        assert any(rule.matches(item) for item in cases), rule.name
+    for item in cases:
+        case_tolerances(item, stored)  # 重なる規則がない
+    (text_baseline,) = [rule for rule in stored if rule.tags == ("text_baseline",)]
+    assert text_baseline.items == {"baseline": Tolerance(rule="text_baseline", tolerance_pt=0.5, stacked=True)}
 
 
 def test_comparison_reports_identifiers_tags_and_values():
@@ -1179,6 +1454,85 @@ def test_math_data_ink_box_keeps_position_with_fractional_clip(tmp_path):
         for offset in (0.0, 0.06, 0.12, 0.5, 0.99):
             rect = Box(100 + offset, 190 + offset, 200 + offset, 250 + offset)
             assert tool.ink_box(document[0], rect) == pytest.approx((120, 200, 160, 230), abs=1e-6), offset
+
+
+@pytest.mark.parametrize("mode", ["inline", "display"])
+@pytest.mark.parametrize("edge", ["top", "bottom"])
+def test_math_data_tool_rejects_vertically_clipped_ink(tmp_path, mode, edge):
+    """測定枠より高い式は、切り取った寸法を照合データに書かず、測定不能として返す。"""
+    tool = load_tool(MATH_TOOL)
+    path = tmp_path / "clipped.pdf"
+    area = [96.0, 76.0, 200.0, 40.0]
+    top, bottom = (60, 105) if edge == "top" else (90, 130)
+    with Document() as document:
+        page = document.new_page(width=720, height=540)
+        if mode == "inline":
+            page.insert_text((100, 100), "[", fontname="helv", fontsize=20, color=RGB)
+            page.insert_text((150, 100), "]", fontname="helv", fontsize=20, color=RGB)
+        page.draw_rect((115, top, 140, bottom), color=None, fill=RGB)
+        document.save(path)
+    item = {"id": "clipped", "mode": mode, "expression": "tall", "area": area}
+    items, failed = tool.measure_pdf(path, [{"id": "page", "items": [item]}], math_font="Times-Roman")
+    assert items == [] and failed == [f"{mode}: tall"]
+
+
+@pytest.mark.parametrize("edge", ["top", "bottom"])
+def test_math_data_tool_rejects_ink_clipped_at_page_edge(tmp_path, edge):
+    tool = load_tool(MATH_TOOL)
+    path = tmp_path / "page-edge.pdf"
+    top, bottom = (-5, 20) if edge == "top" else (80, 105)
+    with Document() as document:
+        page = document.new_page(width=200, height=100)
+        page.draw_rect((50, top, 75, bottom), color=None, fill=RGB)
+        document.save(path)
+    item = {"id": "clipped", "mode": "display", "expression": "tall", "area": [40, 0, 60, 100]}
+    items, failed = tool.measure_pdf(path, [{"id": "page", "items": [item]}])
+    assert items == [] and failed == ["display: tall"]
+
+
+def test_math_data_tool_ignores_disconnected_ink_from_previous_row(tmp_path):
+    """計測画像の上端に前の行の描画があっても、空白の行で離れていれば対象の式のクリップとは扱わない。"""
+    tool = load_tool(MATH_TOOL)
+    path = tmp_path / "previous-row.pdf"
+    with Document() as document:
+        page = document.new_page(width=720, height=540)
+        page.insert_text((100, 100), "[", fontname="helv", fontsize=20, color=RGB)
+        page.insert_text((150, 100), "]", fontname="helv", fontsize=20, color=RGB)
+        page.draw_rect((115, 68, 140, 74), color=None, fill=RGB)
+        page.draw_rect((115, 88, 140, 105), color=None, fill=RGB)
+        document.save(path)
+    item = {"id": "inline", "mode": "inline", "expression": "x", "area": [96, 76, 200, 40]}
+    items, failed = tool.measure_pdf(path, [{"id": "page", "items": [item]}], math_font="Times-Roman")
+    assert failed == [] and len(items) == 1
+    assert items[0]["ink_pt"][2:] == [12, 5]
+
+
+@pytest.mark.parametrize("opening,closing", [("]", "]"), ("[", "["), ("]", "[")])
+def test_math_data_tool_finds_marker_sides_by_position(tmp_path, monkeypatch, opening, closing):
+    """文字コードの対応が逆でも、本文中の角括弧を飛ばし、位置が外側の 2 つを目印にする。"""
+    tool = load_tool(MATH_TOOL)
+    path = tmp_path / "reversed-marks.pdf"
+    with Document() as document:
+        page = document.new_page(width=720, height=540)
+        for x, text in ((100, "["), (120, "[]"), (150, "]")):
+            page.insert_text((x, 100), text, fontname="helv", fontsize=20, color=RGB)
+        document.save(path)
+    read_chars = tool._chars
+
+    def swapped_chars(page, rect):
+        chars = read_chars(page, rect)
+        for char in chars:
+            if char["origin"][0] == 100:
+                char["c"] = opening
+            elif char["origin"][0] == 150:
+                char["c"] = closing
+        return chars[::-1]  # 抽出順にも依存しない。
+
+    monkeypatch.setattr(tool, "_chars", swapped_chars)
+    item = {"id": "inline", "mode": "inline", "expression": r"\text{[]}", "area": [96, 76, 200, 40]}
+    items, failed = tool.measure_pdf(path, [{"id": "page", "items": [item]}], math_font="Times-Roman")
+    assert failed == [] and len(items) == 1
+    assert items[0]["advance_pt"] == pytest.approx(50 - text_length("[", fontname="helv", fontsize=20), abs=0.001)
 
 
 def test_math_data_tool_lays_out_generic_deck(tmp_path):

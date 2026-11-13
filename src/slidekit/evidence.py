@@ -60,15 +60,22 @@ class PageParts:
     full: str  # 互換画像（mc:Fallback）を含む全体
     footer: dict | None  # {"area": [x, y, w, h], "text": "12"}。_theme/footer がなければ None
     fields: tuple[str, ...]  # 表示されうるフィールド（a:fld）の type の一覧
+    # ページ番号の図形（_theme/footer）を除いた choice と full。ページ番号の枠・書式・文字だけが変わったページを、
+    # 番号の領域を除いた画像の比較で引き継ぐのに使う（footer がなければ None）。
+    body_choice: str | None = None
+    body_full: str | None = None
 
     def to_json(self) -> dict:
         """生成記録の page_parts の値（slide_id と number は含めない）。"""
-        return {
+        value = {
             "choice": self.choice,
             "full": self.full,
             "footer": None if self.footer is None else dict(self.footer),
             "fields": list(self.fields),
         }
+        if self.body_choice is not None:
+            value.update(body_choice=self.body_choice, body_full=self.body_full)
+        return value
 
 
 def _parser():
@@ -171,6 +178,14 @@ def _footer_shapes(root):
                 yield shape
 
 
+def _drop_footer(root) -> None:
+    """ページ番号の図形を取り除く（ページ番号を除いた証拠に使う）。"""
+    for shape in list(_footer_shapes(root)):
+        parent = shape.getparent()
+        if parent is not None:
+            parent.remove(shape)
+
+
 def _mask_page_number(root) -> None:
     """ページ番号の図形の数字をすべて 0 にする。桁数が同じ番号の変化では証拠を変えない。"""
     for shape in _footer_shapes(root):
@@ -207,8 +222,10 @@ def _fields(root, *, displayed_only: bool) -> set[str]:
 class _Package:
     """部品の証拠を、部品と種類ごとに 1 回だけ（full と choice を同時に）計算する。"""
 
-    def __init__(self, parts: Mapping[str, bytes]):
+    def __init__(self, parts: Mapping[str, bytes], *, drop_footer: bool = False):
         self.parts = parts
+        # 真なら、ページ番号の図形の数字を 0 にする代わりに、図形ごと除く。
+        self._footer = _drop_footer if drop_footer else _mask_page_number
         self._parser = _parser()
         self._relations: dict[str, dict] = {}
         self._memo: dict[tuple[str, str], tuple[str, str]] = {}
@@ -276,7 +293,7 @@ class _Package:
         self._active.add(key)
         try:
             root = self.root(name)
-            _mask_page_number(root)
+            self._footer(root)
             relations = self.relationships(name)
             referenced: set[str] = set()
             choice_values: dict[str, str] = {}
@@ -293,7 +310,7 @@ class _Package:
             if choice_values:
                 # 属性から参照する部品の choice と full が違うときだけ、choice の値で作り直す（雛形の部品どうしの参照）。
                 unwrapped = self.root(name)
-                _mask_page_number(unwrapped)
+                self._footer(unwrapped)
                 _unwrap_alternate_content(unwrapped)
                 choice_tree = _structures(
                     unwrapped, lambda identifier: self.reference(kind, relations.get(identifier))[1]
@@ -343,6 +360,7 @@ def pptx_pages(path: str | Path) -> dict[str, PageParts]:
     parts = read_package(path)
     ordered, _ = slide_order(parts)
     package = _Package(parts)
+    bodies = _Package(parts, drop_footer=True)
     presentation = package.presentation()
     result: dict[str, PageParts] = {}
     for number, name in enumerate(ordered, 1):
@@ -358,13 +376,17 @@ def pptx_pages(path: str | Path) -> dict[str, PageParts]:
             if shared:
                 fields |= _fields(package.root(shared), displayed_only=True)
         full, choice = package.part(name, "slide")
+        footer = _footer(root)
+        body = bodies.part(name, "slide") if footer is not None else None
         result[slide_id] = PageParts(
             slide_id=slide_id,
             number=number,
             choice=json_digest({"slide": choice, "presentation": presentation}),
             full=json_digest({"slide": full, "presentation": presentation}),
-            footer=_footer(root),
+            footer=footer,
             fields=tuple(sorted(fields)),
+            body_choice=None if body is None else json_digest({"slide": body[1], "presentation": presentation}),
+            body_full=None if body is None else json_digest({"slide": body[0], "presentation": presentation}),
         )
     return result
 
@@ -404,6 +426,19 @@ def display_environment(
             "scale": float(scale),
         }
     )
+
+
+def visual_body_digest(
+    page: PageParts, renderer: str, variant: str, environment_hash: str, *, render_date: str, number: int | None = None
+) -> str | None:
+    """ページ番号の図形を除いた表示の証拠（visual_digest と同じ形）。ページ番号の図形がなければ None。
+
+    確認の引き継ぎで、ページ番号の枠・書式・文字だけが変わったページを見分けるのに使う。確認対象の証拠には使わない。
+    """
+    if page.body_choice is None or page.body_full is None:
+        return None
+    body = PageParts(page.slide_id, page.number, page.body_choice, page.body_full, None, page.fields)
+    return visual_digest(body, renderer, variant, environment_hash, render_date=render_date, number=number)
 
 
 def visual_digest(
@@ -540,6 +575,66 @@ def render_difference(
     return result
 
 
+def difference_boxes(
+    source: str | Path,
+    target: str | Path,
+    *,
+    masks: Sequence[Sequence[float]] = (),
+    scale: float = RENDER_SCALE,
+    block_pt: float = 12.0,
+) -> list[list[float]]:
+    """2 つのページ画像で、NOISE_LEVEL を超えて色が違う領域（pt の [x, y, w, h]）の列。比較画像に枠を描くのに使う。
+
+    画像を block_pt 四方の区画に分け、強い差のある区画を、隣り合うものどうしまとめた外接矩形にする。masks の領域
+    （ページ番号の枠など）は render_difference と同じく除く。寸法が違う画像はページ全体を 1 つの領域にする。
+    引き継ぎの判定には使わない（判定は render_difference の 1 画素のずれを許した比較で行う）。
+    """
+    from PIL import Image, ImageChops, ImageDraw
+
+    with Image.open(source) as first, Image.open(target) as second:
+        before, after = first.convert("RGB"), second.convert("RGB")
+    if before.size != after.size:
+        return [[0.0, 0.0, after.width / scale, after.height / scale]]
+    for mask in masks:
+        x, y, width, height = (float(value) for value in mask)
+        box = [
+            math.floor((x - MASK_PADDING_PT) * scale),
+            math.floor((y - MASK_PADDING_PT) * scale),
+            math.ceil((x + width + MASK_PADDING_PT) * scale),
+            math.ceil((y + height + MASK_PADDING_PT) * scale),
+        ]
+        for image in (before, after):
+            ImageDraw.Draw(image).rectangle(box, fill=(255, 0, 255))
+    strong = _strong(_channel_max(ImageChops.difference(before, after)))
+    if strong.getbbox() is None:
+        return []
+    size = max(1, round(block_pt * scale))
+    columns, rows = math.ceil(strong.width / size), math.ceil(strong.height / size)
+    marked = {
+        (column, row)
+        for row in range(rows)
+        for column in range(columns)
+        if strong.crop((column * size, row * size, (column + 1) * size, (row + 1) * size)).getbbox() is not None
+    }
+    boxes = []
+    while marked:
+        stack = [marked.pop()]
+        group = set(stack)
+        while stack:
+            column, row = stack.pop()
+            for neighbour in ((column + dx, row + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)):
+                if neighbour in marked:
+                    marked.remove(neighbour)
+                    group.add(neighbour)
+                    stack.append(neighbour)
+        left = min(column for column, _ in group) * size
+        top = min(row for _, row in group) * size
+        right = min(strong.width, (max(column for column, _ in group) + 1) * size)
+        bottom = min(strong.height, (max(row for _, row in group) + 1) * size)
+        boxes.append([left / scale, top / scale, (right - left) / scale, (bottom - top) / scale])
+    return sorted(boxes, key=lambda box: (box[1], box[0]))
+
+
 def _fragments(value) -> list:
     """断片の列（種類・文字列・書式・リンク）。文字列は 1 つの文字の断片とする。"""
     if value is None:
@@ -567,7 +662,7 @@ def _image_digest(element: Mapping, project) -> str:
     raise ValueError(f"画像の内容を確かめられない: {element.get('id')}")
 
 
-def content_digest(slide: Mapping, project) -> str:
+def _content_value(slide: Mapping, project) -> dict:
     """ページの内容の証拠：題名・文字・数式・ノート・出典・図の構造と、そのページが参照する元資料・文献項目。
 
     slide は素材の準備（`assets.prepare_assets`）の後の場面のページである。画像は元素材の内容の SHA-256（`source_sha256`）で
@@ -605,24 +700,39 @@ def content_digest(slide: Mapping, project) -> str:
                 source = {"document_id": source} if source in documents else {"bib_key": source}
             if source.get("document_id"):
                 document = documents.get(source["document_id"])
-                used_documents[source["document_id"]] = (
-                    project.input_files.get(str(document.get("path")), "missing") if document else "missing"
-                )
+                if document and document.get("affects_content") is False:
+                    used_documents[source["document_id"]] = "untracked"
+                else:
+                    used_documents[source["document_id"]] = (
+                        project.input_files.get(str(document.get("path")), "missing") if document else "missing"
+                    )
             if source.get("bib_key"):
                 used_entries[source["bib_key"]] = entries.get(source["bib_key"], "missing")
         items.append(item)
-    return json_digest(
-        {
-            "format": EVIDENCE_VERSION,
-            "slide_id": slide["id"],
-            "title": slide.get("title"),
-            "title_content": title_content,
-            "notes": slide.get("notes"),
-            "elements": sorted(items, key=lambda item: item["id"]),
-            "documents": used_documents,
-            "bibliography": used_entries,
-        }
-    )
+    return {
+        "format": EVIDENCE_VERSION,
+        "slide_id": slide["id"],
+        "title": slide.get("title"),
+        "title_content": title_content,
+        "notes": slide.get("notes"),
+        "elements": sorted(items, key=lambda item: item["id"]),
+        "documents": used_documents,
+        "bibliography": used_entries,
+    }
+
+
+def content_digest(slide: Mapping, project) -> str:
+    """ページの内容の証拠（`_content_value` の値のハッシュ値）。"""
+    return json_digest(_content_value(slide, project))
+
+
+def content_parts(slide: Mapping, project) -> dict:
+    """内容の証拠の内訳。page はページ自身（題名・文字・ノート・出典など）のハッシュ値、documents と bibliography は
+    参照する元資料と文献項目ごとのハッシュ値である。内容の確認が引き継がれなかった理由（本文の変更か元資料の変更か）を示すのに使う。
+    """
+    value = _content_value(slide, project)
+    page = {key: item for key, item in value.items() if key not in ("documents", "bibliography")}
+    return {"page": json_digest(page), "documents": value["documents"], "bibliography": value["bibliography"]}
 
 
 def deck_digest(scene: Mapping, project) -> str:

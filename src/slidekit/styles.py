@@ -39,6 +39,7 @@ TEXT_KEYS = frozenset(
         "font_math",
         "emphasis_color",
         "word_wrap",
+        "phrase_wrap",
     }
 )
 FRAME_KEYS = frozenset({"fill", "line_color", "line_width_pt", "dashed"})
@@ -77,7 +78,7 @@ DEFAULT_CHAINS = MappingProxyType(
 DEFAULT_KINDS = frozenset(DEFAULT_CHAINS)  # [defaults] の下で受け付ける表の名前
 
 # 役割だけが持ち、書式へ写さない項目。
-ROLE_ONLY_KEYS = frozenset({"inherits", "allowed_slide_ids", "allowed_content", "restricted"})
+ROLE_ONLY_KEYS = frozenset({"inherits", "allowed_slide_ids", "allowed_content", "restricted", "skip_checks"})
 ROLE_KEYS = TEXT_KEYS | FRAME_KEYS | {"corner_radius_pt"} | ROLE_ONLY_KEYS
 PAINT_KEYS = frozenset({"fill", "line_color"})  # "none" を受け付ける色の項目
 COLOR_KEYS = PAINT_KEYS | {"color", "emphasis_color"}
@@ -111,6 +112,7 @@ LIBRARY_DEFAULTS = MappingProxyType(
         "line_color": None,
         "line_width_pt": 1.0,
         "word_wrap": True,
+        "phrase_wrap": False,
     }
 )
 
@@ -331,7 +333,7 @@ def _color(value: Any) -> str | None:
 _VALUE_RULES = {
     **dict.fromkeys(("size_pt", "min_size_pt", "line_spacing", "line_spacing_pt"), _positive),
     **dict.fromkeys(("line_width_pt", "corner_radius_pt"), _non_negative),
-    **dict.fromkeys(("bold", "word_wrap", "dashed"), _boolean),
+    **dict.fromkeys(("bold", "word_wrap", "phrase_wrap", "dashed"), _boolean),
     **dict.fromkeys(("font_japanese", "font_latin", "font_math"), _font),
     **dict.fromkeys(COLOR_KEYS, _color),
     "align": _choice(ALIGN_VALUES),
@@ -398,7 +400,7 @@ def element_layer(overrides: Mapping | None, kind: str) -> dict:
 
 
 def fragment_style(style: Mapping, fragment: Mapping) -> dict:
-    """断片の実効書式 {size_pt, bold, color, underline, link} を返す。
+    """断片の実効書式 {size_pt, bold, color, underline, superscript, link} を返す。
 
     style は要素の解決済みの書式、fragment は場面の断片（kind、text、任意の style・link）。断片の指定が要素より優先する。
     強調（emphasis の断片と、emphasis が真の数式）は、指定がなければ太字と要素の強調色を使う。
@@ -419,5 +421,6 @@ def fragment_style(style: Mapping, fragment: Mapping) -> dict:
         "bold": bool(bold),
         "color": color,
         "underline": bool(own.get("underline")),
+        "superscript": bool(own.get("superscript")),
         "link": fragment.get("link"),
     }

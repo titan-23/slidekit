@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import bisect
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import astuple, dataclass
@@ -38,6 +39,7 @@ __all__ = [
     "FontRun",
     "TextLine",
     "TextLayout",
+    "WRAP_KINDS",
     "ElementLayout",
     "LayoutModel",
     "MeasureError",
@@ -52,11 +54,12 @@ __all__ = [
     "layout_text",
     "layout_element",
     "layout_scene",
+    "phrase_wrapped_content",
     "fit_findings",
     "layout_record",
 ]
 
-MEASURE_VERSION = "7"  # 計測の方式を変えたら上げる。診断の証拠と生成記録に含める
+MEASURE_VERSION = "9"  # 計測の方式を変えたら上げる。診断の証拠と生成記録に含める
 
 # 行頭禁則と行末禁則。PowerPoint の折り返しを予測する基準の表で、書き出しの p:kinsoku にも同じ表を書く。
 # Office の日本語の「標準」の禁則文字に、PowerPoint 16.0（build 20430）が行頭に置かなかった小書きの仮名と長音記号を加えた
@@ -95,6 +98,7 @@ _HYPHENS = frozenset("-‐")
 _SPACES = frozenset(" 　")
 # 行間をちょうど 1 とみなす差。書き出しの行間（a:spcPct）は 1/100000 単位なので、その丸めの範囲にする。
 _EXACT_SPACING = 5e-6
+_MATH_LINE_ABOVE = 0.75  # 行間を掛けた全高のうち基線より上に置く割合（背の高い式では上限）
 _ROUNDED_ADJUST = 0.16667  # 角丸の大きさの既定（ECMA-376 の roundRect の adj）
 _ROUNDED_TEXT = 0.29289  # 角丸の文字領域の係数（同 rect の il）
 _DIAGONAL = math.sqrt(0.5)  # cos 45°（楕円の文字領域）
@@ -153,6 +157,10 @@ class MathBox:
     descent: float  # 基線より下のインク（0 以上）
     line_ascent: float  # 行の配置に使う上側。行間 1.0 での値
     line_descent: float  # 行の配置に使う下側。行間 1.0 での値
+    # 描画範囲の左右（式の左端を原点とする。左は送りの始まりより左なら負）。文字の送りには使わず、はみ出しの検査に使う。
+    # None は送り幅の範囲（0、width）と同じ。入れ子の分数の線は送り幅より左右へ張り出す。
+    ink_left: float | None = None
+    ink_right: float | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +184,19 @@ class TextLine:
     hard_break: bool  # 明示改行（\n）で終わる行か
     near_limit: bool  # 折り返しの判定が計測の誤差の範囲にある行か
     split: bool = False  # 内側の幅より長い語を、PowerPoint と同じく語の途中で分けた行か
+    # 数式の描画が行の送りの範囲（左端から width まで）より左・右へ張り出す量（pt、0 以上）。入れ子の分数の線など
+    overhang_left: float = 0.0
+    overhang_right: float = 0.0
+    # 行末の自動の折り返しの種類（明示改行で終わる行と最後の行は None）。WRAP_KINDS の値
+    wrap: str | None = None
+    characters: int = 0  # 空白を除いた文字の数（数式は 1 つと数える）
+    origin: tuple[int, int] | None = None  # 行の最初の単位の、断片の番号と断片の文字列の中の位置（空の行は None）
+
+
+# 自動の折り返しの種類。space は空白の後、math は数式の前後、punctuation は約物や欧文と和文の境、phrase は和文の文節の境、
+# mid_phrase は和文の文節の途中、hyphen は欧文の語のハイフンの後、split は内側より長い語の途中、other はそれ以外
+# （文節の区切りを判定できない場合を含む）。
+WRAP_KINDS = ("space", "math", "punctuation", "phrase", "mid_phrase", "hyphen", "split", "other")
 
 
 @dataclass(frozen=True)
@@ -191,6 +212,7 @@ class TextLayout:
     width: float  # 枠の幅（指定した幅、なければ内容から）
     height: float  # 必要な枠の高さ（文字ブロックと上下の距離の和）
     word_wrap: bool
+    natural_width: float = 0.0  # 折り返さないときの最も広い行の幅（明示改行だけで分けた行。1 行に収めるのに要る幅）
 
 
 @dataclass(frozen=True)
@@ -237,6 +259,10 @@ class LayoutModel:
     hidden_tolerance_pt: float = 1.5  # 塗りも線もない枠からのはみ出しの許容
     padding_overlap_min_pt: float = 1.0  # 余白へのはみ出しを警告する最小の量
     padding_overlap_ratio: float = 0.25  # 同（その辺の余白に対する割合）
+    superscript_offset_em: float = 0.3  # 上付きの断片の基準線のずらし（文字サイズに対する割合。書き出しの baseline）
+    superscript_scale: float = 2 / 3  # 上付きの断片を PowerPoint が描く大きさの倍率
+    short_line_characters: int = 2  # 自動で折り返した段落の最後の行を短いとみなす文字の数（以下）
+    short_line_ratio: float = 0.2  # 同じく、内側の幅に対する割合（未満）
 
 
 MODEL = LayoutModel()
@@ -499,6 +525,7 @@ class _Style:
     align: str
     valign: str
     corner_radius: float | None
+    phrase_wrap: bool = False  # 和文の文字の間では、文節の境（と幅より長い文節の中）だけで折り返す
 
 
 def _family(style: Mapping, key: str, *, required: bool = True) -> str | None:
@@ -536,6 +563,9 @@ def _text_style(style: Mapping) -> _Style:
     if valign not in _VALIGNS:
         raise _style_error(f"valign は {'、'.join(_VALIGNS)} のいずれかにしてください", setting="valign", value=valign)
     radius = style.get("corner_radius_pt")
+    phrase_wrap = style.get("phrase_wrap") or False
+    if not isinstance(phrase_wrap, bool):
+        raise _style_error("phrase_wrap は真偽値で指定してください", setting="phrase_wrap", value=phrase_wrap)
     return _Style(
         size=_positive(style.get("size_pt"), "size_pt"),
         bold=bold,
@@ -549,6 +579,7 @@ def _text_style(style: Mapping) -> _Style:
         align=align,
         valign=valign,
         corner_radius=None if radius is None else _nonnegative(radius, "corner_radius_pt"),
+        phrase_wrap=phrase_wrap,
     )
 
 
@@ -684,6 +715,7 @@ class _Unit:
     stacked: bool = False  # 背の高い数式の規則（_math_line）に当たる数式
     under: bool = False  # 同じく、下に置くもの（\underset・\limits の下の添字）を含む数式
     radical: bool = False  # 文中の背の高い根号の規則（_math_line）に当たる数式
+    origin: tuple[int, int] | None = None  # 断片の番号と、その断片の文字列の中の位置（明示改行を入れる位置に使う）
 
 
 @dataclass(slots=True)
@@ -703,6 +735,7 @@ class _Piece:
     size: float
     bold: bool
     split: bool  # 語の途中で分けた行か
+    wrap: str | None = None  # 行末の自動の折り返しの種類
 
 
 class _Faces:
@@ -766,7 +799,12 @@ def _math_box(fonts: FontSource, expr: str, size: float, bold: bool, style: _Sty
     values = [getattr(box, name, None) for name in ("width", "ascent", "descent", "line_ascent", "line_descent")]
     if not all(_number(value) for value in values) or values[0] < 0:
         raise MeasureError("数式の寸法が不正です", expression=expr, box=repr(box))
-    return MathBox(*(max(0.0, float(value)) for value in values))
+    sides = [getattr(box, name, None) for name in ("ink_left", "ink_right")]
+    if not all(value is None or _number(value) for value in sides):
+        raise MeasureError("数式の描画範囲が不正です", expression=expr, box=repr(box))
+    return MathBox(
+        *(max(0.0, float(value)) for value in values), *(None if value is None else float(value) for value in sides)
+    )
 
 
 def _structure(expr: str) -> str | None:
@@ -779,8 +817,8 @@ def _structure(expr: str) -> str | None:
       （根号の規則は式のインクの上を根号の上として使うので、根号より上へ出うる部分がある式には当てない）。
     - None：それ以外。構文の誤りは数式の計測が先に報告するので、ここでは None にする。
 
-    PowerPoint は添字の中の分数（a^{\\frac{a}{c}}）と上だけに置くもの（\\overset{n}{x}）の行を、背が高くても
-    行間 × インクの上に置く（数式の計測の上側に行間を掛けた値と合う）。下に置くものは \\underset{x \\in S}{\\arg\\min} f(x)・
+    添字の中の分数（a^{\\frac{a}{c}}）と上だけに置くもの（\\overset{n}{x}）には、背が高くても通常の数式の行の規則を
+    当てる（_math_line）。下に置くものは \\underset{x \\in S}{\\arg\\min} f(x)・
     \\underset{i}{\\max} x_i・\\lim\\limits_{n \\to \\infty} a_n で確かめた。添字の土台の中の分数（(\\frac{a}{b})^2）は規則に当たる。
     """
     from .math import syntax
@@ -827,7 +865,9 @@ def _structure(expr: str) -> str | None:
     return "radical" if found["radical"] and not found["raised"] else None
 
 
-def _math_line(unit: "_Unit", spacing: float, model: LayoutModel, floor: float = 0.0) -> tuple[float, float, bool]:
+def _math_line(
+    unit: "_Unit", spacing: float, model: LayoutModel, floor: float = 0.0, bottom: float | None = None
+) -> tuple[float, float, bool]:
     """数式の単位の、行の上側と下側（pt）と、規則で置いたか（下側を行間によらない値にしたか）。
 
     背の高い数式（unit.stacked）は、行間 1 以上で次のように置く（s は数式の断片の文字サイズ、sp は行間）。
@@ -838,7 +878,8 @@ def _math_line(unit: "_Unit", spacing: float, model: LayoutModel, floor: float =
       e = (sp − 1) × h が math_stack_above_full × d 以下なら e をすべて行の上に、超えれば math_stack_above_share × e を
       行の上に置き、残りを行の下に置く（上側 a + 上の分、下側 d + 残り）。切り替わる行間は式の d と h で決まり、
       一定の行間や h の割合では分けることができない（20 pt の独立した分数は行間 1.3 まですべて上、総和は 1.4 まで
-      すべて上で、どちらも次の行間から 4 分の 3 を上）。
+      すべて上で、どちらも次の行間から 4 分の 3 を上）。行間が 1 より大きいときは、上側を全高 sp × h の
+      4 分の 3 以下に抑え、減らした分を下に回す。上に偏る入れ子の分数でも、行全体の高さは変えない。
     - 和がそれより小さく、下に置くものを含まない式：上側 math_stack_top_ratio × sp × インクの上、下側 d。
     - どちらも上側は数式の計測の line_ascent × sp より小さくしない。d には行間を掛けない。最後の行の下側は _arrange で決める
       （独立した数式だけの行は d と残り、文字の段落の行は d）。
@@ -848,8 +889,11 @@ def _math_line(unit: "_Unit", spacing: float, model: LayoutModel, floor: float =
     max(line_ascent × sp, math_radical_top_ratio × sp × インクの上) にする。下側（次の行への行送りに使う値）は、行間 1.0 の
     行の高さに行間を掛けた値から上側を引いた sp × (T1 + d) − 上側（行間 1.0 では d）にする。最後の行の下側は d。
 
-    ほかの数式は line_ascent・line_descent に行間を掛ける。ただし行間がちょうど 1 の行の上側は、インクの上 +
-    math_stack_gap_em × s より小さくしない（行間 1.0 の背の高い数式の a と同じ値）。行間 1 未満の背の高い数式は
+    ほかの数式の行間 1.0 の上側は A = max(line_ascent, インクの上 + math_stack_gap_em × s) にする。
+    A が floor より高く、行間が 1 より大きいときは、H = A + max(line_descent, bottom) を行間 1.0 の全高とし、
+    行間を掛けた全高 sp × H の 4 分の 3 を上、残りを下に置く。bottom は文字の行間 1.0 の下側で、インクの下とは別である。
+    独立した数式だけの行では bottom を None にして、この規則を当てない。
+    それ以外は line_ascent・line_descent に行間を掛ける（行間 1.0 の上側は A）。行間 1 未満の背の高い数式は
     確かめていないので、上側を max(line_ascent, math_stack_top_ratio × インクの上) × sp、下側を line_descent × sp にする。
 
     PowerPoint 16.0.20430.20182 の校正用の資料で確かめたのは 18〜28 pt、行間 1.0・1.15・1.2・1.3・1.4・1.5・2.0 である。
@@ -859,7 +903,9 @@ def _math_line(unit: "_Unit", spacing: float, model: LayoutModel, floor: float =
     \\underset（1.15）で確かめた。根号の規則は実際の資料の PDF の文中の O(\\sqrt{n\\log n}) の形の式（14・18・20 pt、
     行間 1.2）と、校正用の資料の 18〜24 pt の行間 1.2 と 20 pt の行間 1.0・1.5 の上揃え・中揃え・下揃えで確かめ、根号の行の
     次の行への行送りは 20 pt の行間 1.2 の 1 要素、行間がちょうど 1 の上側の下限は \\overset{n}{x}（20 pt）の 1 要素で
-    確かめた。
+    確かめた。通常の数式で広がる行は、2026-10-23 の校正用の資料の上付きの横分数・斜線・上下の分数を含む式で、
+    12・20・32 pt、行間 1.0・1.15・1.2・1.5、欧文・和文・複数行と縦の揃えを変えて確かめた。
+    上に偏る入れ子の分数の上側の上限は、12・20・32 pt、行間 1.0〜2.0 の文中・独立した数式と、縦の揃え・複数行で確かめた。
     """
     box, size = unit.box, unit.size
     top, lower = spacing * box.line_ascent, spacing * box.line_descent
@@ -869,8 +915,13 @@ def _math_line(unit: "_Unit", spacing: float, model: LayoutModel, floor: float =
         above = single if exact else max(top, model.math_radical_top_ratio * spacing * box.ascent)
         return above, spacing * (single + box.descent) - above, True
     if not unit.stacked:
+        single = max(box.line_ascent, box.ascent + model.math_stack_gap_em * size)
         if exact:
-            top = max(top, box.ascent + model.math_stack_gap_em * size)
+            top = single
+        elif spacing > 1.0 and bottom is not None and single > floor:
+            whole = spacing * (single + max(bottom, box.line_descent))
+            top = _MATH_LINE_ABOVE * whole
+            lower = whole - top
         return top, lower, False
     if spacing < 1.0 - _EXACT_SPACING:
         return max(top, model.math_stack_top_ratio * spacing * box.ascent), lower, False
@@ -882,6 +933,8 @@ def _math_line(unit: "_Unit", spacing: float, model: LayoutModel, floor: float =
             above = extra
         else:
             above = model.math_stack_above_share * extra
+        if not exact:
+            above = min(above, _MATH_LINE_ABOVE * spacing * whole - above_ink)
         return max(top, above_ink + above), box.descent + extra - above, True
     return max(top, model.math_stack_top_ratio * spacing * box.ascent), box.descent, True
 
@@ -902,7 +955,7 @@ def _prepare(content, style: _Style, faces: _Faces, display: bool) -> list[_Hard
     missing: list[str] = []
     fonts, model = faces.fonts, faces.model
     previous: tuple[str, str, bool, float, bool] | None = None  # 直前の通常文字の（文字、書体、太字、大きさ、forced）
-    for kind, text, own, fragment in fragments:
+    for position, (kind, text, own, fragment) in enumerate(fragments):
         size, bold = _fragment_font(own, fragment, style)
         if kind == "math":
             box = _math_box(fonts, text, size, bold, style, display)
@@ -924,16 +977,24 @@ def _prepare(content, style: _Style, faces: _Faces, display: bool) -> list[_Hard
                     stacked=structure in ("stacked", "under"),
                     under=structure == "under",
                     radical=structure == "radical" and not display,
+                    origin=(position, 0),
                 )
             )
             previous = None
             continue
         kerning = size >= model.kerning_min_size_pt
+        # 上付き（書き出しの baseline）：送り幅とインクは縮めた大きさで求め、インクを基準線のずらしの分だけ上げる。
+        # 行の配置に使う文字サイズ（_Unit.size）は断片の大きさのままにする。上付きの文字は前後と詰めない。
+        raised = bool(own.get("superscript")) if isinstance(own, Mapping) else False
+        scale = model.superscript_scale if raised else 1.0
+        lift = model.superscript_offset_em * size if raised else 0.0
+        cursor = 0  # 断片の文字列の中の位置
         for index, part in enumerate(text.split("\n")):
             if index:
                 lines.append(_HardLine([], size, bold))
                 previous = None
-            for char in part:
+                cursor += 1  # 明示改行の分
+            for column, char in enumerate(part, cursor):
                 font = faces.font(char, bold)
                 if font is None:
                     if char not in missing:
@@ -945,6 +1006,7 @@ def _prepare(content, style: _Style, faces: _Faces, display: bool) -> list[_Hard
                 kern = 0.0
                 if (
                     kerning
+                    and not raised
                     and previous is not None
                     and previous[1:] == (family, bold, size, forced)
                     and family == style.latin
@@ -953,18 +1015,18 @@ def _prepare(content, style: _Style, faces: _Faces, display: bool) -> list[_Hard
                     and faces.metrics(family, bold).has_kerning
                 ):
                     kern = fonts.kerning(previous[0], char, family, bold) * size
-                previous = (char, family, bold, size, forced)
+                previous = None if raised else (char, family, bold, size, forced)
                 space = char in _SPACES
                 ink = None
                 if not space:
                     y_min, y_max = fonts.glyph_bounds(char, family, bold)
                     if (y_min, y_max) != (0.0, 0.0):
-                        ink = (y_max * size, -y_min * size)
+                        ink = (y_max * size * scale + lift, -y_min * size * scale - lift)
                 lines[-1].units.append(
                     _Unit(
                         char,
                         False,
-                        fonts.advance(char, family, bold) * size,
+                        fonts.advance(char, family, bold) * size * scale,
                         kern,
                         size,
                         bold,
@@ -973,8 +1035,10 @@ def _prepare(content, style: _Style, faces: _Faces, display: bool) -> list[_Hard
                         ink,
                         None,
                         family,
+                        origin=(position, column),
                     )
                 )
+            cursor += len(part)
     if missing:
         raise _glyph_missing(missing, style.latin, style.japanese)
     return lines
@@ -1044,18 +1108,41 @@ def _split(units: Sequence[_Unit], start: int, index: int) -> int:
     return count
 
 
+def _phrase_limits(units: Sequence[_Unit], breaks: list[bool], widths: _Widths, available: float) -> list[bool]:
+    """phrase_wrap の分ける位置：和文の文字どうしの間は、文節の境だけにする。内側の幅より長い文節の中は今までどおり分ける。"""
+    candidates = [
+        k for k in range(1, len(units)) if breaks[k] and _japanese_letter(units[k - 1]) and _japanese_letter(units[k])
+    ]
+    if not candidates:
+        return breaks
+    boundaries = _phrase_boundaries("".join(_OBJECT if unit.math else unit.text for unit in units))
+    if boundaries is None:
+        return breaks
+    cuts = sorted(boundaries | {0, len(units)})
+    result = list(breaks)
+    for k in candidates:
+        if k in boundaries:
+            continue
+        index = bisect.bisect_right(cuts, k)
+        if widths.width(cuts[index - 1], cuts[index]) <= available + _EPSILON:
+            result[k] = False
+    return result
+
+
 def _wrap(
-    units: Sequence[_Unit], widths: _Widths, available: float | None, model: LayoutModel
+    units: Sequence[_Unit], widths: _Widths, available: float | None, model: LayoutModel, phrase: bool = False
 ) -> list[tuple[int, int, bool, bool]]:
     """明示改行で分けた 1 行を、内側の幅に収まる限り前から詰めて分ける。
 
     戻り値は（始まり、終わり、誤差の範囲か、語の途中で分けたか）。分ける位置のないまま内側の幅を超えた場合
-    （内側より長い語など）は、_split の位置で分ける。
+    （内側より長い語など）は、_split の位置で分ける。phrase が真なら、和文の文字の間は文節の境だけで分ける。
     """
     count = len(units)
     if available is None or count == 0:
         return [(0, count, False, False)]
     breaks = _breaks(units)
+    if phrase:
+        breaks = _phrase_limits(units, breaks, widths, available)
     following = [count] * (count + 1)  # following[k]：k 以降で breaks が真になる最初の位置
     for k in range(count - 1, 0, -1):
         following[k] = k if breaks[k] else following[k + 1]
@@ -1101,6 +1188,89 @@ def _line_text(units: Sequence[_Unit]) -> str:
     return "".join(f"${unit.text}$" if unit.math else unit.text for unit in units)
 
 
+def _overhang(units: Sequence[_Unit], width: float) -> tuple[float, float]:
+    """数式の描画が、行の送りの範囲（0 から width）より左・右へ張り出す量（pt）。
+
+    文字の送りは送り幅で決め、はみ出しの検査だけに描画範囲を使う（入れ子の分数の線は式の送りの始まりより左に出る）。
+    通常文字は字形の左右を計測しないので、送りの範囲のままにする。
+    """
+    x = left = right = 0.0
+    for index, unit in enumerate(units):
+        if index:
+            x += unit.kern
+        box = unit.box
+        if unit.math and box is not None and unit.ink is not None:
+            if box.ink_left is not None:
+                left = max(left, -(x + box.ink_left))
+            if box.ink_right is not None:
+                right = max(right, x + box.ink_right - width)
+        x += unit.width
+    return left, right
+
+
+_phrase_parser = None
+_phrase_lock = threading.Lock()
+_OBJECT = "￼"  # 文節の判定で数式の代わりに置く文字
+
+
+def _phrase_boundaries(text: str) -> frozenset[int] | None:
+    """和文の文節の境の位置（文字の番号。0 と末尾を除く）。BudouX の日本語のモデルで判定する。
+
+    BudouX を読み込むことができなければ None にする（折り返しの種類を other にし、診断を出さない）。
+    """
+    global _phrase_parser
+    with _phrase_lock:
+        if _phrase_parser is None:
+            try:
+                import budoux
+
+                _phrase_parser = budoux.load_default_japanese_parser()
+            except (ImportError, OSError, ValueError):
+                _phrase_parser = False
+        parser = _phrase_parser
+    if parser is False:
+        return None
+    positions, offset = set(), 0
+    for chunk in parser.parse(text)[:-1]:
+        offset += len(chunk)
+        positions.add(offset)
+    return frozenset(positions)
+
+
+def _japanese_letter(unit: _Unit) -> bool:
+    """文節の判定の対象にする和文の文字（漢字・仮名・々・ー など。約物と記号を除く）。"""
+    return not unit.math and unit.east_asian and unicodedata.category(unit.text).startswith("L")
+
+
+def _wrap_kinds(units: Sequence[_Unit], wrapped: Sequence[tuple[int, int, bool, bool]]) -> list[str | None]:
+    """明示改行で分けた 1 行の、各行の末尾の折り返しの種類（WRAP_KINDS。最後の行は None）。"""
+    kinds: list[str | None] = []
+    boundaries: frozenset[int] | None | bool = False  # 未計算
+    for index, (_start, end, _near, split) in enumerate(wrapped):
+        if index == len(wrapped) - 1:
+            kinds.append(None)
+            continue
+        before, after = units[end - 1], units[end]
+        if split:
+            kind = "split"
+        elif before.space:
+            kind = "space"
+        elif before.math or after.math:
+            kind = "math"
+        elif before.text in _HYPHENS and after.text.isalnum():
+            kind = "hyphen" if end >= 2 and units[end - 2].text.isalnum() and not units[end - 2].east_asian else "other"
+        elif _japanese_letter(before) and _japanese_letter(after):
+            if boundaries is False:
+                boundaries = _phrase_boundaries("".join(_OBJECT if unit.math else unit.text for unit in units))
+            kind = "other" if boundaries is None else "phrase" if end in boundaries else "mid_phrase"
+        elif before.east_asian or after.east_asian:
+            kind = "punctuation"
+        else:
+            kind = "other"
+        kinds.append(kind)
+    return kinds
+
+
 def _line_top(ascent: float, spacing: float, model: LayoutModel) -> float:
     """行の上側（em）。ascent は行の書体の組の上側の割合、spacing は行間。
 
@@ -1129,7 +1299,8 @@ def _arrange(
       空白だけの行が、欧文の書体だけの位置に置かれた）。組の上側と下の割合 A・D を _Faces.natural で求める。
     - 行の上側は _line_top(A, sp) × s。行送りは前の行の下側（1.2 × sp × s − 上側）と次の行の上側の和
       （同じ書体の組の行どうしは 1.2 × sp × s）。文字ブロックの下端は最後の基線から D × s（sp によらない）。
-    - 数式は _math_line の上側と下側で行の上下を広げる（ほとんどの式は line_ascent・line_descent に行間を掛けた値）。
+    - 数式は _math_line の上側と下側で行の上下を広げる。通常の数式が文字の上側を超える段落では、行間 1.0 の行全体の
+      高さに行間を掛け、4 分の 3 を上に置く。独立した数式だけの行と低い式は line_ascent・line_descent に行間を掛ける。
       分数などを含む背の高い式と文中の背の高い根号を行間 1 以上で置いた行は、最後の行の文字ブロックの下端を、
       独立した数式だけの行では _math_line の下側（d と行間で増えた分の残り）、文字の段落の行では d にする。ほかの数式で
       最後の行の数式が下側より深い分は、文字ブロックの下端も下げる。
@@ -1144,7 +1315,8 @@ def _arrange(
     pieces = []
     for number, line in enumerate(lines):
         widths = _Widths(line.units)
-        wrapped = _wrap(line.units, widths, available, model)
+        wrapped = _wrap(line.units, widths, available, model, style.phrase_wrap)
+        kinds = _wrap_kinds(line.units, wrapped)
         for index, (start, end, near, split) in enumerate(wrapped):
             last = index == len(wrapped) - 1
             pieces.append(
@@ -1157,6 +1329,7 @@ def _arrange(
                     line.size,
                     line.bold,
                     split,
+                    kinds[index],
                 )
             )
     pitch = model.line_pitch_em
@@ -1182,7 +1355,8 @@ def _arrange(
             lowers.append(pitch * spacing * scale - top)
             bottoms.append(descent_em * scale)
             floors.append(_line_top(ascent_em, 1.0, model) * scale)
-        placed = [(unit, _math_line(unit, spacing, model, max(floors))) for unit in units if unit.math]
+        text_bottom = None if display and not text_units else max(bottoms)
+        placed = [(unit, _math_line(unit, spacing, model, max(floors), text_bottom)) for unit in units if unit.math]
         maths = [line for _unit, line in placed]
         math_only = display and bool(maths) and not text_units
         base_top, base_descent, bottom = max(tops), max(lowers), max(bottoms)
@@ -1215,6 +1389,7 @@ def _arrange(
     for piece, baseline in zip(pieces, baselines):
         inks = [unit.ink for unit in piece.units if unit.ink is not None]
         width = max(piece.width, available) if justify and piece.soft else piece.width
+        overhang_left, overhang_right = _overhang(piece.units, piece.width)
         result.append(
             TextLine(
                 _line_text(piece.units),
@@ -1225,6 +1400,11 @@ def _arrange(
                 piece.hard_break,
                 piece.near,
                 piece.split,
+                overhang_left,
+                overhang_right,
+                piece.wrap,
+                sum(1 for unit in piece.units if not unit.space),
+                piece.units[0].origin if piece.units else None,
             )
         )
     return tuple(result), max(line.width for line in result), height
@@ -1260,6 +1440,7 @@ def _cache_key(content, style: Mapping, width, height, shape, display, model) ->
         "line_spacing_pt",
         "padding_pt",
         "word_wrap",
+        "phrase_wrap",
         "align",
         "corner_radius_pt",
     )
@@ -1296,6 +1477,7 @@ def _text_layout(content, style: Mapping, fonts: FontSource, *, width, height, s
     faces = _Faces(fonts, parsed, model)
     lines = _prepare(content, parsed, faces, display)
     unbreakable = _unbreakable(lines)
+    natural = max((_Widths(line.units).width(0, len(line.units)) for line in lines), default=0.0)
     if width is None:
         arranged, content_width, content_height = _arrange(lines, None, parsed, faces, model, display)
         # 折り返す要素は、計測の誤差で PowerPoint が折り返さないよう、誤差の帯の分だけ広げる。
@@ -1325,6 +1507,7 @@ def _text_layout(content, style: Mapping, fonts: FontSource, *, width, height, s
             frame_width,
             frame_height,
             parsed.word_wrap,
+            natural,
         )
     else:
         # 角丸の文字領域は高さにも依存するので、折り返しが変わらなくなるまで高さを求め直す。
@@ -1352,7 +1535,16 @@ def _text_layout(content, style: Mapping, fonts: FontSource, *, width, height, s
             insets = _insets(shape, width, frame_height, parsed)
             needed = frame_height
         result = TextLayout(
-            arranged, content_width, content_height, available, unbreakable, insets, width, needed, parsed.word_wrap
+            arranged,
+            content_width,
+            content_height,
+            available,
+            unbreakable,
+            insets,
+            width,
+            needed,
+            parsed.word_wrap,
+            natural,
         )
     if entries is not None:
         with _cache_lock:
@@ -1455,8 +1647,9 @@ def layout_element(element: Mapping, fonts: FontSource, *, model: LayoutModel = 
         inked = [(left, line) for left, line in zip(lefts, text.lines) if line.ink_top > 0 or line.ink_bottom > 0]
         ink = None
         if inked:
-            x0 = min(left for left, _line in inked)
-            x1 = max(left + line.width for left, line in inked)
+            # 左右は送りの範囲に、数式の描画の張り出し（入れ子の分数の線など）を加える。
+            x0 = min(left - line.overhang_left for left, line in inked)
+            x1 = max(left + line.width + line.overhang_right for left, line in inked)
             y0 = min(block_top + line.baseline - line.ink_top for _left, line in inked)
             y1 = max(block_top + line.baseline + line.ink_bottom for _left, line in inked)
             ink = Rect(x0, y0, max(0.0, x1 - x0), max(0.0, y1 - y0))
@@ -1475,6 +1668,31 @@ def layout_element(element: Mapping, fonts: FontSource, *, model: LayoutModel = 
         if error.element_id is None and element_id is not None:
             error.element_id = str(element_id)
         raise
+
+
+def phrase_wrapped_content(element: Mapping, fonts: FontSource, *, model: LayoutModel = MODEL) -> list[dict]:
+    """phrase_wrap の要素の断片の列に、計測した自動の折り返しの位置で明示改行（\n）を入れた写しを返す。
+
+    PowerPoint は和文の文字の間ならどこでも折り返すので、文節の境で折り返した行を明示改行で固定する。
+    折り返しのない要素はそのままの写しを返す。数式の前で折り返す行は、直前の文字の断片の末尾か、改行だけの断片で分ける。
+    """
+    content = [dict(fragment) for fragment in element.get("content") or []]
+    lines = layout_element(element, fonts, model=model).text.lines
+    breaks = [
+        line.origin
+        for previous, line in zip(lines, lines[1:])
+        if previous.wrap is not None and not previous.hard_break and line.origin is not None
+    ]
+    for index, column in sorted(breaks, reverse=True):
+        fragment = content[index]
+        if fragment.get("kind") != "math":
+            text = fragment.get("text", "")
+            content[index] = {**fragment, "text": text[:column] + "\n" + text[column:]}
+        elif index > 0 and content[index - 1].get("kind") != "math":
+            content[index - 1] = {**content[index - 1], "text": content[index - 1].get("text", "") + "\n"}
+        else:
+            content.insert(index, {"kind": "text", "text": "\n"})
+    return content
 
 
 def _has_text(content) -> bool:
@@ -1524,6 +1742,12 @@ def fit_findings(layout: ElementLayout, *, model: LayoutModel = MODEL) -> list[d
     - text_padding_overlap（警告）：はみ出しではないが、余白が 0 より大きい辺で、インクが余白に
       max(1 pt, 余白の 25 %) を超えて入り込む。
     - text_wrap_near_limit（参考）：折り返しの判定が計測の誤差の範囲にある行がある。
+    - text_short_line（参考）：自動で折り返した段落の最後の行が 2 文字以下か、内側の幅の short_line_ratio 未満である。
+    - text_wrap_mid_phrase（参考）：和文の文節の途中で自動で折り返した行がある（BudouX の日本語のモデルで判定する）。
+    - text_wrap_hyphen（参考）：欧文の語のハイフンの後で自動で折り返した行がある。
+
+    text_overflow と text_padding_overlap の observations には、折り返しで増えた行数と、高さの不足と、
+    明示改行だけで分けたときの最も広い行の幅（single_line_width_pt。1 行に収めるのに要る内側の幅）を加える。
     """
     text, area, inner, ink = layout.text, layout.text_area, layout.inner, layout.ink
     common = {
@@ -1533,6 +1757,13 @@ def fit_findings(layout: ElementLayout, *, model: LayoutModel = MODEL) -> list[d
         "line_widths_pt": [_round(line.width) for line in text.lines],
         "word_wrap": text.word_wrap,
     }
+    hard_lines = 1 + sum(1 for line in text.lines[:-1] if line.hard_break)
+    shortfall = text.content_height - inner.h
+    sizing = {"hard_lines": hard_lines}
+    if len(text.lines) > hard_lines:
+        sizing["single_line_width_pt"] = _round(text.natural_width)
+    if shortfall > _EPSILON:
+        sizing["height_shortfall_pt"] = _round(shortfall)
     located = {
         **common,
         "required_height_pt": _round(text.content_height),
@@ -1557,7 +1788,7 @@ def fit_findings(layout: ElementLayout, *, model: LayoutModel = MODEL) -> list[d
             overflow = {}
     if overflow or unbreakable:
         messages = []
-        observations = dict(located)
+        observations = {**located, **sizing}
         if overflow:
             messages.append("文章が文字領域からはみ出している")
             observations["overflow_pt"] = {"side": side, "amount": _round(overflow[side])}
@@ -1607,6 +1838,7 @@ def fit_findings(layout: ElementLayout, *, model: LayoutModel = MODEL) -> list[d
                     "message": "文章が余白に入り込んでいる",
                     "observations": {
                         **located,
+                        **sizing,
                         "overflow_pt": {"side": side, "amount": _round(excess[side])},
                         "suggestion": "余白を小さくするか領域を広げる",
                     },
@@ -1629,6 +1861,77 @@ def fit_findings(layout: ElementLayout, *, model: LayoutModel = MODEL) -> list[d
                 },
             }
         )
+    findings.extend(_wrap_findings(text, inner.w, common, model))
+    return findings
+
+
+def _break_context(line: TextLine, following: TextLine, size: int = 6) -> str:
+    """折り返しの前後の文字（「…届いたた / め、…」の形の表示用）。"""
+    before, after = line.text.rstrip(), following.text.lstrip()
+    head = before if len(before) <= size else "…" + before[-size:]
+    tail = after if len(after) <= size else after[:size] + "…"
+    return f"{head} / {tail}"
+
+
+def _wrap_findings(text: TextLayout, available: float, common: dict, model: LayoutModel) -> list[dict]:
+    """自動の折り返しの位置の参考（短い最後の行、和文の文節の途中、欧文の語のハイフンの後）。"""
+    if not text.word_wrap or available <= 0:
+        return []
+    lines = text.lines
+    findings = []
+    short, short_text = [], []
+    start = 0
+    for index, line in enumerate(lines):
+        if not (line.hard_break or index == len(lines) - 1):
+            continue
+        last = lines[index]
+        if (
+            index > start
+            and last.characters
+            and (last.characters <= model.short_line_characters or last.width < model.short_line_ratio * available)
+        ):
+            short.append(index + 1)
+            short_text.append(last.text.strip())
+        start = index + 1
+    if short:
+        findings.append(
+            {
+                "code": "text_short_line",
+                "severity": "info",
+                "message": "自動で折り返した段落の最後の行が短い",
+                "observations": {
+                    **common,
+                    "short_lines": short,
+                    "short_texts": short_text,
+                    "ratio": model.short_line_ratio,
+                    "suggestion": "改行を明示するか、幅か文言を変えて行の長さをそろえる",
+                },
+            }
+        )
+    for kind, finding in (
+        (
+            "mid_phrase",
+            {"code": "text_wrap_mid_phrase", "severity": "info", "message": "和文の文節の途中で折り返している"},
+        ),
+        (
+            "hyphen",
+            {"code": "text_wrap_hyphen", "severity": "info", "message": "欧文の語のハイフンの後で折り返している"},
+        ),
+    ):
+        numbers = [number for number, line in enumerate(lines[:-1], 1) if line.wrap == kind]
+        if numbers:
+            suggestion = (
+                "文節の境に改行を明示するか、幅か文言を変える"
+                if kind == "mid_phrase"
+                else "語の前で改行を明示するか、幅を広げる"
+            )
+            observations = {
+                **common,
+                "wrapped_lines": numbers,
+                "breaks": [_break_context(lines[number - 1], lines[number]) for number in numbers],
+                "suggestion": suggestion,
+            }
+            findings.append({**finding, "observations": observations})
     return findings
 
 
@@ -1661,6 +1964,7 @@ def layout_record(layout: ElementLayout) -> dict:
                 "ink_bottom_pt": _round(line.ink_bottom),
                 "hard_break": line.hard_break,
                 "near_limit": line.near_limit,
+                "wrap": line.wrap,
             }
             for line, left in zip(text.lines, layout.line_left)
         ],

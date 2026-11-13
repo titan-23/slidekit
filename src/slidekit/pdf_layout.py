@@ -184,8 +184,8 @@ def _normal_text(content: list[Mapping]) -> str:
 
 
 def _text_in_math(expression: str) -> str:
-    """数式のうち、文字用の書体で描かれる \\text{...} の中身を出現順につなげる。"""
-    return "".join(_TEXT_IN_MATH.findall(expression))
+    """数式のうち、文字用の書体で描かれる \\text{...} の中身を出現順につなげる（- は書き出しと同じくハイフン U+2010 にする）。"""
+    return "".join(_TEXT_IN_MATH.findall(expression)).replace("-", "\u2010")
 
 
 def _area(element: Mapping) -> tuple[float, float, float, float] | None:

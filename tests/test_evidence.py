@@ -130,7 +130,11 @@ def test_same_scene_gives_same_page_parts(tmp_path):
         "full": before["a"].full,
         "footer": {"area": [660.0, 510.0, 36.0, 22.0], "text": "1"},
         "fields": [],
+        "body_choice": before["a"].body_choice,
+        "body_full": before["a"].body_full,
     }
+    # ページ番号の図形を除いた証拠は、番号の図形を含む証拠と別の値である。
+    assert before["a"].body_choice != before["a"].choice
 
 
 def test_inserted_page_keeps_parts_of_other_pages(tmp_path):

@@ -14,7 +14,7 @@ import unicodedata
 from .errors import InputError
 
 # 場面データの断片の "style" に書く項目（指定したものだけを書く）。
-STYLE_KEYS = ("size_pt", "bold", "color", "underline")
+STYLE_KEYS = ("size_pt", "bold", "color", "underline", "superscript")
 
 # リンク先の形式。slidekit はリンク先へ接続しない。
 LINK = re.compile(r"(?:https?://|mailto:)\S+")
@@ -62,7 +62,7 @@ def _validate(fragment) -> None:
     """断片の値の型を確かめ、size_pt を float にそろえる。"""
     if not isinstance(fragment.text, str):
         raise _invalid(fragment, "text", "文字列", fragment.text)
-    for name in ("bold", "underline"):
+    for name in ("bold", "underline", "superscript"):
         value = getattr(fragment, name, None)
         if value is not None and not isinstance(value, bool):
             raise _invalid(fragment, name, "真偽値", value)
@@ -79,7 +79,10 @@ def _validate(fragment) -> None:
 
 @dataclass(frozen=True, repr=False)
 class Text:
-    """通常の文字。`link` は外部のリンク先（`https://`・`http://`・`mailto:` で始まる文字列）。"""
+    """通常の文字。`link` は外部のリンク先（`https://`・`http://`・`mailto:` で始まる文字列）。
+
+    `superscript=True` は上付き（PowerPoint の文字の基準線のずらし。脚注の番号などに使う）。
+    """
 
     text: str
     _: KW_ONLY
@@ -88,6 +91,7 @@ class Text:
     size_pt: float | None = None
     underline: bool | None = None
     link: str | None = None
+    superscript: bool | None = None
 
     def __post_init__(self):
         _validate(self)
@@ -106,6 +110,7 @@ class Emphasis:
     size_pt: float | None = None
     underline: bool | None = None
     link: str | None = None
+    superscript: bool | None = None
 
     def __post_init__(self):
         _validate(self)

@@ -144,6 +144,8 @@ def new_run(project: Any, *, command: str, options: dict) -> Path:
         "started_at": started,
         "updated_at": started,
         "project": str(project.path),
+        # 実行保存先。資料を実行保存先ごと移しても、保存先から見た資料の相対位置で所属を判定できるようにする。
+        "config": {"output_dir": str(Path(project.output_dir).resolve())},
         "command": command,
         "options": dict(options),
         "stage": "construct",
@@ -200,25 +202,40 @@ def marker_state(run: Path) -> dict:
     none は印がない、interrupted は生成のプロセスがもうない、unknown は判定できない（旧形式の印、別の端末・OS・PID 名前空間、
     Windows の Python）である。整理では running と unknown を保護し、interrupted を中断した生成として扱う。
     """
-    path = Path(run) / _MARKER
-    result = {"state": "none", "pid": None, "host": None, "started_at": None, "stage": None, "reason": None}
-    if not os.path.lexists(path):
-        return result
+    return _marker_state(*_read_marker(Path(run)))
 
-    def judged(state: str, reason: str) -> dict:
-        return {**result, "state": state, "reason": reason}
+
+def _read_marker(run: Path) -> tuple[dict | None, str | None]:
+    """生成中の印と、読めなかった理由。印がなければ両方 None。"""
+    path = run / _MARKER
+    if not os.path.lexists(path):
+        return None, None
 
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
-        return judged("unknown", f"生成中の印を読めません: {error}")
+        return None, f"生成中の印を読めません: {error}"
     try:
         marker = json.loads(text)
     except json.JSONDecodeError:
         # 0.1 の印は資料のパスだけの文字列である。
-        return judged("unknown", _LEGACY_REASON)
+        return None, _LEGACY_REASON
     if not isinstance(marker, dict) or marker.get("schema_version") != MARKER_VERSION:
-        return judged("unknown", "対応していない形式の生成中の印です")
+        return None, "対応していない形式の生成中の印です"
+    return marker, None
+
+
+def _marker_state(marker: dict | None, problem: str | None) -> dict:
+    """読み込み済みの印から生成の状態を判定する。"""
+    result = {"state": "none", "pid": None, "host": None, "started_at": None, "stage": None, "reason": None}
+
+    def judged(state: str, reason: str) -> dict:
+        return {**result, "state": state, "reason": reason}
+
+    if problem:
+        return judged("unknown", problem)
+    if marker is None:
+        return result
     pid = marker.get("pid")
     result.update(pid=pid, host=marker.get("host"), started_at=marker.get("started_at"), stage=marker.get("stage"))
     if not isinstance(pid, int) or isinstance(pid, bool) or not 0 < pid <= _MAX_PID:
@@ -286,11 +303,13 @@ def _entries(runs_dir: Path) -> list[dict]:
         if path.is_symlink() or not path.is_dir():
             continue
         manifest, problem = _read_manifest(path)
-        marker = marker_state(path)
+        marker_record, marker_problem = _read_marker(path)
+        marker = _marker_state(marker_record, marker_problem)
         entry = {
             "path": path.resolve(),
             "run_id": path.name,
             "manifest": manifest is not None,
+            "identity": manifest if manifest is not None else marker_record,
             "problem": problem,
             "status": None,
             "mode": None,
@@ -385,9 +404,11 @@ def protected_runs(project: Any, runs_dir: Path, output_dir: Path) -> dict[Path,
 
     保護するのは、採用中、反映した実行と退避した旧版、反映が未完了の実行と復旧に要る旧版、確認記録の引き継ぎ元、
     実行中（marker_state が running か unknown）、生成記録も生成中の印もない実行（割り当ての直後か、手で作ったもの）、
-    生成記録の読み込みに失敗した実行、生成が終わっていない実行（status が FINISHED_STATUSES にない）である。
+    生成記録の読み込みに失敗した実行、生成が終わっていない実行（status が FINISHED_STATUSES にない）、
+    現在の資料の実行と確認できない実行である。理由は文言の列で返す（識別子と詳細は clean_runs の結果の protected）。
     """
-    return _protected(project, Path(output_dir), _entries(Path(runs_dir)))
+    found = _protected(project, Path(output_dir), _entries(Path(runs_dir)))
+    return {path: [reason["message"] for reason in reasons] for path, reasons in found.items()}
 
 
 # 採用記録・反映の記録・確認記録の形式は records が持つ（形式 1 の記録も読む）。読めなければ records.RecordError になり、
@@ -412,49 +433,99 @@ def _carry_sources(run: Path) -> list[Any]:
     return records._run_sources(run)
 
 
-def _protected(project: Any, output_dir: Path, entries: list[dict]) -> dict[Path, list[str]]:
-    root = Path(project.root).resolve()
-    protected: dict[Path, list[str]] = {}
+# 整理で実行を残す理由の識別子（clean --json の protected の reason_codes）。
+PROTECTION_CODES = (
+    "adopted",  # 現在採用している実行
+    "exported",  # 完成物として反映した実行
+    "previous_export",  # 旧版として退避した実行
+    "export_pending",  # 反映が未完了の実行
+    "export_recovery",  # 復旧に必要な旧版の実行
+    "running",  # 実行中
+    "running_unknown",  # 実行中か判定できない
+    "unreadable",  # 生成記録を読むことができない
+    "no_record",  # 生成記録も生成中の印もない
+    "unfinished",  # 生成が終わっていない
+    "other_project",  # 別の資料の実行
+    "unknown_project",  # 所属を確認できない（記録に資料か実行保存先がない）
+    "carry_source",  # 確認記録の引き継ぎ元
+)
 
-    def protect(path: Any, reason: str) -> None:
+
+def _protected(project: Any, output_dir: Path, entries: list[dict]) -> dict[Path, list[dict]]:
+    """保護する実行と理由（{"code", "message", ...}）の列。code は PROTECTION_CODES の値である。"""
+    from . import records
+
+    root = Path(project.root).resolve()
+    protected: dict[Path, list[dict]] = {}
+    identity = {
+        "project": str(Path(getattr(project, "path", root / "deck.toml")).resolve()),
+        "project_root": str(root),
+        "config": {"output_dir": str(output_dir.resolve())},
+    }
+
+    def protect(path: Any, reason: str, code: str, **details: Any) -> None:
         if isinstance(path, (str, os.PathLike)) and str(path):
             # 相対パスは資料のディレクトリから読む（絶対パスはそのまま）。
             reasons = protected.setdefault((root / path).resolve(), [])
-            if reason not in reasons:
-                reasons.append(reason)
+            if all(item["message"] != reason for item in reasons):
+                reasons.append({"code": code, "message": reason, **details})
 
     record_name = project.config.get("deliverables", {}).get("record")
     if record_name:
         record_path = (root / record_name).resolve()
         if record_path.exists():
-            protect(_read_export_record(record_path).get("run"), "現在採用している実行")
+            protect(_read_export_record(record_path).get("run"), "現在採用している実行", "adopted")
     exports = output_dir / "exports"
     if exports.is_dir():
         for path in sorted(exports.glob("*/transaction.json")):
             transaction = _read_export_record(path)
             if transaction.get("status") == "committed":
-                protect(transaction.get("run"), "完成物として反映した実行")
-                protect(transaction.get("previous_run"), "旧版として退避した実行")
+                protect(transaction.get("run"), "完成物として反映した実行", "exported")
+                protect(transaction.get("previous_run"), "旧版として退避した実行", "previous_export")
         pending = exports / "pending.json"
         if pending.exists():
             transaction = _read_export_record(pending)
-            protect(transaction.get("run"), "完成物の反映が未完了の実行")
-            protect(transaction.get("previous_run"), "復旧に必要な旧版の実行")
+            protect(transaction.get("run"), "完成物の反映が未完了の実行", "export_pending")
+            protect(transaction.get("previous_run"), "復旧に必要な旧版の実行", "export_recovery")
     for entry in entries:
         run, marker = entry["path"], entry["marker"]
         if marker["state"] == "running":
-            protect(run, f"実行中（PID {marker['pid']}、段階 {marker['stage']}）")
+            protect(run, f"実行中（PID {marker['pid']}、段階 {marker['stage']}）", "running")
         elif marker["state"] == "unknown":
-            protect(run, f"実行中か判定できない: {marker['reason']}")
+            protect(run, f"実行中か判定できない: {marker['reason']}", "running_unknown")
         if entry["problem"]:
-            protect(run, entry["problem"])
+            protect(run, entry["problem"], "unreadable")
         elif not entry["manifest"]:
             if marker["state"] == "none":
-                protect(run, "生成記録も生成中の印もない（割り当ての直後か、手で作った実行）")
+                protect(run, "生成記録も生成中の印もない（割り当ての直後か、手で作った実行）", "no_record")
         elif not (isinstance(entry["status"], str) and entry["status"] in FINISHED_STATUSES):
-            protect(run, f"生成が終わっていない（status: {entry['status']}）")
+            protect(run, f"生成が終わっていない（status: {entry['status']}）", "unfinished")
+        # 実行保存先を共有する別の資料は整理しない。資料を実行保存先ごと移した場合は、確認の引き継ぎと同じく
+        # 実行保存先から見た資料の相対位置で判定する。印だけの実行は記録された資料のパスが一致するときだけ対象にする。
+        found = entry["identity"] or {}
+        if run not in protected and not records._same_project(found, identity):
+            recorded = found.get("project") if isinstance(found.get("project"), str) else None
+            place = records._project_place(found)
+            if recorded and place is not None:
+                # 所属の情報はあるが、資料の場所も、実行保存先から見た資料の位置も違う（別の資料の実行）。
+                protect(
+                    run,
+                    f"別の資料の実行（資料: {recorded}）",
+                    "other_project",
+                    recorded_project=recorded,
+                    recorded_place=place,
+                    current_place=records._project_place(identity),
+                )
+            else:
+                # 生成記録か生成中の印に、資料の場所か実行保存先がない（古い形式の印など）。
+                protect(
+                    run,
+                    "現在の資料の実行と確認できない（記録に資料か実行保存先がない）",
+                    "unknown_project",
+                    recorded_project=recorded,
+                )
         for source in _carry_sources(run):
-            protect(source, "確認記録の引き継ぎ元")
+            protect(source, "確認記録の引き継ぎ元", "carry_source")
     return protected
 
 
@@ -487,7 +558,8 @@ def clean_runs(
     （failed は status が failed・stopped の実行と中断した実行、drafts は下書きと部分生成）。
     (3) before があれば、その実行より前に絞る。(4) keep があれば、残った実行の新しい keep 件を候補から外す。
     戻り値の candidates の各項目は {"run", "run_id", "status", "mode", "bytes", "reason"}、candidate_paths は候補のパスの列
-    （0.1 の candidates と同じ形）、protected は {"run", "reasons"} の列である。
+    （0.1 の candidates と同じ形）、protected は {"run", "run_id", "reasons", "reason_codes", "details"} の列である（reason_codes は PROTECTION_CODES の値、details は理由ごとの code・message と、別資料の実行では記録された資料の場所と実行保存先から見た位置）。
+    資料を実行保存先ごと移した場合も整理できる。実行保存先から見た資料の場所で判定し、別の資料や所属不明の実行は保護する。
     """
     if before is None and keep is None and not failed and not drafts:
         raise ValueError("--before、--keep、--failed、--drafts のいずれかを指定してください")
@@ -550,7 +622,13 @@ def clean_runs(
         "candidate_paths": [item["run"] for item in candidates],
         "removed": removed,
         "protected": [
-            {"run": str(entry["path"]), "reasons": protected[entry["path"]]}
+            {
+                "run": str(entry["path"]),
+                "run_id": entry["run_id"],
+                "reasons": [reason["message"] for reason in protected[entry["path"]]],
+                "reason_codes": [reason["code"] for reason in protected[entry["path"]]],
+                "details": protected[entry["path"]],
+            }
             for entry in entries
             if entry["path"] in protected
         ],

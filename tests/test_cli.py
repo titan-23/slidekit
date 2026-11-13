@@ -51,12 +51,14 @@ def test_every_command_accepts_json_and_quiet():
     commands = dict(leaf_parsers(cli.parser()))
     assert set(commands) == {
         "layout",
+        "measure",
         "doctor",
         "build",
         "check",
         "export",
         "clean",
         "review status",
+        "review sheet",
         "review record",
         "review accept",
         "review revoke",
@@ -88,7 +90,9 @@ def test_layout_command_summary_and_json(deck, capsys):
     out, err = output(capsys)
     lines = out.splitlines()
     assert lines[0] == "配置の検査: 合格（エラー 0 件、警告 0 件）" and lines[1].endswith("（1 ページ）")
-    assert lines[-1].startswith("次の操作: slidekit build --draft --project ")
+    assert lines[-2].startswith("次の操作: slidekit build --draft --project ")
+    # 最後の行は合否と終了コードである。
+    assert lines[-1] == "結果: 合格（エラー 0、終了コード 0）"
     assert main(["layout", "--project", str(deck), "--slides", "intro", "--json"]) == 0
     out, err = output(capsys)
     result = json.loads(out)
@@ -299,7 +303,7 @@ def test_interrupt_ends_with_code_2_and_shows_run(deck, monkeypatch, capsys):
 
     monkeypatch.setattr(pipeline, "layout", stopped)
     assert main(["layout", "--project", str(deck)]) == 2
-    assert output(capsys)[0].splitlines() == ["配置の検査: 中断", "  処理を中断しました"]
+    assert output(capsys)[0].splitlines() == ["配置の検査: 中断", "  処理を中断しました", "結果: 中断（終了コード 2）"]
 
 
 def test_renderer_status_without_project_uses_common_environment(
@@ -337,7 +341,7 @@ def test_renderer_status_without_project_uses_common_environment(
     assert name == "libreoffice" and "DejaVu Sans" in environment["fonts"]
     assert json.loads(output(capsys)[0])["status"] == "busy"
     assert main(["renderer", "clear", "--force"]) == 0
-    assert seen[-1][2] is True and output(capsys)[0] == "残存記録の解除: 解除する記録なし\n"
+    assert seen[-1][2] is True and output(capsys)[0] == "残存記録の解除: 解除する記録なし\n結果: 成功（終了コード 0）\n"
 
 
 # ---------------------------------------------------------------- 検査・反映・整理
@@ -371,20 +375,23 @@ def test_check_and_status_list_declared_warnings(tmp_path, capsys):
     )
     set_diagnostics(run, [declared])
     complete(run)
-    assert main(["check", "--build", str(run), "--final"]) == 0
+    assert main(["check", "--build", str(run), "--final", "--verbose"]) == 0
     out, _ = output(capsys)
     assert (
         "宣言で許容した警告:\n  p.1 element_overlap label / frame（理由: ラベルを枠に重ねて示す、宣言: slides.py:42）"
         in out
     )
-    assert main(["review", "status", "--build", str(run)]) == 0
+    # --verbose を付けなければ件数だけを示す。
+    assert main(["check", "--build", str(run), "--final"]) == 0
+    assert "宣言で許容した警告: 1 件（一覧は --verbose）" in output(capsys)[0]
+    assert main(["review", "status", "--build", str(run), "--verbose"]) == 0
     out, _ = output(capsys)
     assert out.startswith("確認: 完了（実行 0001、1 ページ、完全な生成）\n")
     assert (
         "  宣言で許容した警告:\n    p.1 element_overlap label / frame（理由: ラベルを枠に重ねて示す、宣言: slides.py:42）"
         in out
     )
-    assert out.splitlines()[-1] == f"次の操作: slidekit export --build {run}"
+    assert out.splitlines()[-2] == f"次の操作: slidekit export --build {run}"
 
 
 def test_export_carry_and_clean_commands(tmp_path):
@@ -485,8 +492,10 @@ def test_review_status_next_commands_need_real_reviewer(tmp_path, capsys):
     run = fixture_run(tmp_path)
     assert main(["review", "status", "--build", str(run), "--json"]) == 1
     status = json.loads(output(capsys)[0])
-    assert status["status"] == "incomplete" and len(status["next"]) == 3
-    for command in status["next"]:
+    # 先頭は未確認をまとめて記録するコマンド（--pending）。続けて組ごとのコマンドを示す。
+    assert status["status"] == "incomplete" and len(status["next"]) == 4
+    assert "--pending --status-id " + status["status_id"] in status["next"][0]
+    for command in status["next"][1:]:
         tokens = shlex.split(command)
         assert tokens[:3] == ["slidekit", "review", "record"]
         assert main(tokens[1:]) == 2
@@ -582,3 +591,117 @@ def test_record_outside_runs_fails_without_lock(tmp_path):
     assert main(command) == 2
     assert not list((tmp_path / "elsewhere").glob(f"*{records.LOCK_NAME}"))
     assert not (tmp_path / records.LOCK_NAME).exists() and review_records(copied) == []
+
+
+# ---------------------------------------------------------------- 2026-11 の追加
+
+
+def test_slides_accepts_values_separated_by_spaces(deck, capsys, monkeypatch):
+    # --slides 1 2 は --slides 1,2 と同じ指定にする（「unrecognized arguments: 2」で止めない）。
+    seen = {}
+
+    def layout(path, *, slides=None, progress=None):
+        seen["slides"] = slides
+        return {"command": "layout", "status": "passed", "exit_code": 0}
+
+    monkeypatch.setattr(pipeline, "layout", layout)
+    assert main(["layout", "--project", str(deck), "--slides", "1", "2-3", "intro"]) == 0
+    assert seen["slides"] == "1,2-3,intro"
+    with pytest.raises(SystemExit):
+        main(["layout", "--project", str(deck), "--slides", "1", "5-3"])
+    assert "--slides" in capsys.readouterr().err
+
+
+def test_check_defaults_to_latest(tmp_path, capsys):
+    run = fixture_run(tmp_path)
+    root = run.parent.parent.parent
+    assert main(["check", "--project", str(root), "--json"]) == 0
+    assert json.loads(output(capsys)[0])["build"] == str(run)
+
+
+def test_review_record_pending_from_command(tmp_path, capsys):
+    run = fixture_run(tmp_path, pages=("intro", "method"))
+    assert main(["review", "status", "--build", str(run), "--json"]) == 1
+    status = json.loads(output(capsys)[0])
+    command = shlex.split(status["next"][0])
+    assert command[:6] == ["slidekit", "review", "record", "--build", str(run), "--pending"]
+    # --pending は --kind・--slides と組み合わせない。--status-id が要る。
+    with pytest.raises(SystemExit):
+        main(["review", "record", "--build", str(run), "--pending", "--kind", "visual", *REVIEWER, "--note", "見た"])
+    with pytest.raises(SystemExit):
+        main(["review", "record", "--build", str(run), "--pending", *REVIEWER, "--note", "見た"])
+    capsys.readouterr()
+    arguments = ["review", "record", "--build", str(run), "--pending", "--status-id", status["status_id"], *REVIEWER]
+    assert main([*arguments, "--note", "画像と本文を確認", "--note-content", "依頼と照合"]) == 0
+    out = output(capsys)[0].splitlines()
+    assert "残り: 表示 0、一覧画像 0、内容 0、警告 0" in out
+    assert out[-2] == f"次の操作: slidekit export --build {run}"
+    assert {record["note"] for record in review_records(run)} == {"画像と本文を確認", "依頼と照合"}
+
+
+def test_next_operations_follow_invocation(monkeypatch, tmp_path):
+    # python -m slidekit で起動したときは、その Python の絶対パスと -m slidekit で次の操作を書く。
+    monkeypatch.setattr(cli.sys, "argv", [str(tmp_path / "slidekit" / "__main__.py")])
+    monkeypatch.setattr(cli.sys, "executable", "/opt/env/bin/../bin/python")
+    program = cli.invocation()
+    assert program == "/opt/env/bin/python -m slidekit"
+    text = "次の操作: slidekit build --project deck.toml\n  slidekit の内部で発生"
+    assert cli._with_program(text, program) == (
+        "次の操作: /opt/env/bin/python -m slidekit build --project deck.toml\n  slidekit の内部で発生"
+    )
+    # PATH にない slidekit を絶対パスで起動したときは、そのパスにする。
+    script = tmp_path / "venv" / "bin" / "slidekit"
+    monkeypatch.setattr(cli.sys, "argv", [str(script)])
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+    assert cli.invocation() == str(script)
+    monkeypatch.setattr(cli.shutil, "which", lambda name: str(script))
+    assert cli.invocation() == "slidekit"
+
+
+def test_layout_wraps_lists_wrapped_lines(deck, capsys, monkeypatch):
+    result = {
+        "command": "layout",
+        "status": "passed",
+        "exit_code": 0,
+        "layout": {
+            "slides": [
+                {
+                    "id": "intro",
+                    "number": 1,
+                    "elements": [
+                        {
+                            "id": "lead",
+                            "inner_pt": [0, 0, 100, 50],
+                            "lines": [
+                                {"text": "届いたた", "width_pt": 80.0, "wrap": "mid_phrase"},
+                                {"text": "め、次へ", "width_pt": 80.0, "wrap": None},
+                            ],
+                        },
+                        {"id": "one", "lines": [{"text": "一行", "width_pt": 40.0, "wrap": None}]},
+                    ],
+                }
+            ]
+        },
+    }
+    monkeypatch.setattr(pipeline, "layout", lambda path, **options: result)
+    assert main(["layout", "--project", str(deck), "--wraps"]) == 0
+    lines = output(capsys)[0].splitlines()
+    start = lines.index("自動で折り返した要素:")
+    assert lines[start + 1 : start + 4] == [
+        "  p.1 lead（内側の幅 100.0 pt）",
+        "    「届いたた」 80.0 pt ← 文節の途中",
+        "    「め、次へ」 80.0 pt",
+    ]
+    assert main(["layout", "--project", str(deck)]) == 0
+    assert "自動で折り返した要素:" not in output(capsys)[0]
+
+
+def test_measure_command_shows_lines(deck, capsys):
+    assert main(["measure", "--project", str(deck), "--width", "60", "AAAA BBBB CCCC", "A"]) == 0
+    lines = output(capsys)[0].splitlines()
+    assert lines[0] == "計測: 2 件（幅 60.0 pt）"
+    assert lines[1].startswith("  1: ") and "1 行に収める枠の幅" in lines[1]
+    assert lines[-1] == "結果: 成功（終了コード 0）"
+    assert main(["measure", "--project", str(deck), "--json", "--width", "content", "AB"]) == 0
+    result = json.loads(output(capsys)[0])
+    assert result["width_pt"] > 60 and result["results"][0]["lines"][0]["text"] == "AB"

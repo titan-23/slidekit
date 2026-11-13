@@ -31,7 +31,7 @@ from typing import Any
 import uuid
 
 from . import runs, selection
-from .evidence import NOISE_PIXELS, RENDER_CHECK_METHOD, render_difference
+from .evidence import NOISE_PIXELS, RENDER_CHECK_METHOD, difference_boxes, render_difference
 from .files import file_hash, json_digest, stage_copy, write_json
 
 SCHEMA_VERSION = 2
@@ -648,7 +648,52 @@ def _artifact_issues(run: Path, manifest: dict) -> list[dict]:
     return issues
 
 
-def _input_issues(inputs: Mapping[str, str]) -> list[dict]:
+def _input_kind(name: str, manifest: dict | None) -> str:
+    """変わった入力の種類（設定・テーマ・Python・入力文書など）。要約で、どの入力が変わったかを示すのに使う。"""
+    if not manifest:
+        return "入力"
+    config = manifest.get("config") if isinstance(manifest.get("config"), dict) else {}
+    inputs = config.get("inputs") if isinstance(config.get("inputs"), dict) else {}
+    path = Path(name)
+    if name == manifest.get("project") or name in (config.get("extends") or []):
+        return "設定"
+    if name == config.get("theme"):
+        return "テーマ"
+    if name == config.get("rules"):
+        return "記述規則"
+    if name in (inputs.get("python") or []):
+        return "Python"
+    for document in inputs.get("documents") or []:
+        if isinstance(document, dict) and document.get("path") == name:
+            return f"入力文書 {document.get('id')}"
+    if name in (inputs.get("bibliography") or []):
+        return "文献"
+    template = config.get("template")
+    if isinstance(template, dict) and template.get("path") == name:
+        return "雛形"
+    environment = manifest.get("environment") if isinstance(manifest.get("environment"), dict) else {}
+    if name in (environment.get("config_files") or []):
+        return "実行環境"
+    fonts = ((environment.get("fonts") or {}).get("fonts") or {}) if isinstance(environment.get("fonts"), dict) else {}
+    for face in fonts.values():
+        if isinstance(face, dict) and name in (face.get("path"), (face.get("bold") or {}).get("path")):
+            return "フォント"
+    if ".dist-info" in name:
+        return "パッケージ"
+    if path.parent == Path(__file__).resolve().parent or Path(__file__).resolve().parent in path.parents:
+        return "slidekit"
+    for directory in inputs.get("asset_dirs") or []:
+        if Path(directory) in path.parents:
+            return "素材"
+    project = Path(str(manifest.get("project") or "")).parent
+    if path.name == "brief.md" and path.parent == project:
+        return "依頼内容"
+    if path.suffix == ".py":
+        return "Python"
+    return "その他"
+
+
+def _input_issues(inputs: Mapping[str, str], manifest: dict | None = None) -> list[dict]:
     issues = []
     for name, expected in inputs.items():
         try:
@@ -661,6 +706,7 @@ def _input_issues(inputs: Mapping[str, str]) -> list[dict]:
                     "input_changed",
                     "参照入力が生成時と一致しないため、再生成が必要である",
                     path=name,
+                    input_kind=_input_kind(name, manifest),
                     expected=expected,
                     actual=actual,
                 )
@@ -687,7 +733,7 @@ def _notices(manifest: dict) -> list[dict]:
     資料の入力（資料のディレクトリと参照範囲の中のファイル）だけを照合する。フォントやパッケージなどの環境のファイルは、
     記録の操作のたびにはハッシュし直さず、check と export が照合する。
     """
-    changed = _input_issues(_project_inputs(manifest))
+    changed = _input_issues(_project_inputs(manifest), manifest)
     if not changed:
         return []
     return [
@@ -695,6 +741,7 @@ def _notices(manifest: dict) -> list[dict]:
             "code": "input_changed",
             "message": "入力が生成後に変わっている。この実行は反映できない。記録は再生成後、証拠が一致すれば引き継がれる",
             "paths": [issue["path"] for issue in changed[:_NOTICE_PATHS]],
+            "kinds": sorted({issue["input_kind"] for issue in changed}),
             "count": len(changed),
         }
     ]
@@ -740,7 +787,7 @@ class _Run:
 
     @cached_property
     def input_issues(self) -> list[dict]:
-        return _input_issues(self.manifest["input_files"])
+        return _input_issues(self.manifest["input_files"], self.manifest)
 
     @cached_property
     def binding(self) -> dict:
@@ -867,10 +914,22 @@ def _footer(manifest: dict, slide_id: str) -> dict | None:
     return footer if isinstance(footer, dict) else None
 
 
+def _same_body(first: dict, second: dict, target: dict) -> bool:
+    """2 つの実行の表示の証拠のうち、ページ番号の図形を除いた証拠（visuals の body_hash）が一致するか。"""
+    key = f"{target.get('renderer')}:{target.get('variant')}"
+    before, after = _visual(first, target.get("slide_id"), key), _visual(second, target.get("slide_id"), key)
+    body = (before or {}).get("body_hash")
+    return isinstance(body, str) and bool(body) and body == (after or {}).get("body_hash")
+
+
 def _footer_masks(first: dict, second: dict, slide_id: str) -> list[list[float]]:
-    """2 つの実行でページ番号の図形の文字が違うときだけ、その領域（pt の [x, y, w, h]）を返す。"""
+    """2 つの実行でページ番号の図形の文字か領域が違うときだけ、両方の領域（pt の [x, y, w, h]）を返す。"""
     footers = [_footer(manifest, slide_id) for manifest in (first, second)]
-    if footers[0] is None or footers[1] is None or footers[0].get("text") == footers[1].get("text"):
+    if (
+        footers[0] is None
+        or footers[1] is None
+        or (footers[0].get("text"), footers[0].get("area")) == (footers[1].get("text"), footers[1].get("area"))
+    ):
         return []
     masks: list[list[float]] = []
     for footer in footers:
@@ -964,10 +1023,18 @@ def _valid_copy(run: Path, state: _Run, record: dict, cache: dict) -> tuple[bool
         if record["kind"] == "accept"
         else _target_key(original) == _target_key(record)
     )
+    check = record.get("render_check") if isinstance(record.get("render_check"), dict) else {}
+    footer_only = (
+        record["kind"] == "visual"
+        and check.get("footer_only") is True
+        and check.get("source_evidence_hash") == original.get("evidence_hash")
+        and bool(check.get("masked"))
+        and _same_body(origin_state.manifest, state.manifest, record)
+    )
     if (
         original.get("kind") != record["kind"]
         or not same_target
-        or original.get("evidence_hash") != record.get("evidence_hash")
+        or (original.get("evidence_hash") != record.get("evidence_hash") and not footer_only)
     ):
         return False, "引き継ぎ元と確認対象が一致しない"
     problem = _record_problem(origin_state, original)
@@ -1237,8 +1304,19 @@ def _evaluate(run: Path, cache: dict, *, final: bool) -> dict:
     if final:
         progress = _Progress(run, cache)
         invalid_records = progress.invalid
+        page_numbers = _numbers(manifest)
         issues.extend(
-            _issue("review_missing", "必要な確認が完了していない", target=required) for required in progress.missing
+            _issue(
+                "review_missing",
+                "必要な確認が完了していない",
+                target=required,
+                **(
+                    {"slide_number": page_numbers[required["slide_id"]]}
+                    if required.get("slide_id") in page_numbers
+                    else {}
+                ),
+            )
+            for required in progress.missing
         )
         issues.extend(
             _issue("warning_unaccepted", "警告が未対応である", diagnostic_id=warning["diagnostic_id"])
@@ -1549,6 +1627,12 @@ def record_review(
         review = state.review
         review["records"].extend(records)
         write_json(run / "review.json", review)
+        remaining = _remaining(run, cache)
+    return _recorded(run, batch, records, targets, notices, remaining)
+
+
+def _recorded(run: Path, batch: str, records: list[dict], targets: list[dict], notices: list, remaining: dict) -> dict:
+    """確認の記録の結果。記録した対象と、残っている確認・未対応の警告の件数を示す。"""
     grouped: dict[str, list] = {}
     for target in targets:
         grouped.setdefault(_target_name(target), []).append(target.get("slide_id"))
@@ -1560,8 +1644,66 @@ def record_review(
         "batch": batch,
         "records": records,
         "targets": grouped,
+        "remaining": remaining,
         "notices": notices,
     }
+
+
+def record_pending(
+    run: Any,
+    reviewer: str,
+    note: str | None,
+    *,
+    status_id: str,
+    notes: dict | None = None,
+    project: Any = None,
+) -> dict:
+    """review status が示した未確認の確認（表示・一覧画像・内容のすべての組）を、1 回でまとめて記録する。
+
+    status_id は review status の結果の status_id（未確認の確認とその証拠から作る値）で、review status の後に未確認の対象が
+    変わっていれば記録しない。notes は種類（visual・overview・content）ごとの確認内容で、ない種類には note を使う。
+    """
+    _written(reviewer, "確認者", "実際に確認した人の名前を書く")
+    notes = {key: value for key, value in (notes or {}).items() if value is not None}
+    for key, value in notes.items():
+        if key not in _REVIEW_KINDS:
+            raise RecordError(f"確認の種類が不正である（visual、overview、content）: {key}")
+        _written(value, "確認内容", "画像や本文を開いて確かめた内容を書く")
+    if note is not None:
+        _written(note, "確認内容", "画像や本文を開いて確かめた内容を書く")
+    if not isinstance(status_id, str) or not status_id:
+        raise RecordError("--pending には review status が示す --status-id が必要である")
+    run = _run_path(resolve_run(run, project=project, allow_latest=False))
+    with _output_lock(_recording_output(run)):
+        cache: dict[Path, _Run] = {}
+        state = _state(cache, run)
+        _assert_recordable(state)
+        notices = _notices(state.manifest)
+        targets = _Progress(run, cache).missing
+        if not targets:
+            raise RecordError("未確認の確認がない")
+        if _status_id(state, "all", None, None, targets) != status_id:
+            raise RecordError("未確認の確認が review status の後に変わった。review status をやり直す")
+        lacking = sorted({target["kind"] for target in targets if (notes.get(target["kind"]) or note) is None})
+        if lacking:
+            raise RecordError("確認内容がない種類がある: " + "、".join(lacking) + "（--note か --note-<種類> で書く）")
+        batch = _new_batch()
+        records = [
+            _new_record(
+                target["kind"],
+                reviewer,
+                notes.get(target["kind"]) or note,
+                state.binding,
+                batch=batch,
+                **{key: target.get(key) for key in ("slide_id", "renderer", "variant", "evidence_hash")},
+            )
+            for target in targets
+        ]
+        review = state.review
+        review["records"].extend(records)
+        write_json(run / "review.json", review)
+        remaining = _remaining(run, cache)
+    return _recorded(run, batch, records, targets, notices, remaining)
 
 
 def accept_warnings(
@@ -1972,18 +2114,23 @@ def _carry_auto(target: Path) -> dict:
     added: list[dict] = []
     sources: Counter[str] = Counter()
     renumbered: list[str] = []
+    renumbered_from: Counter[str] = Counter()
     skipped: Counter[str] = Counter()
 
-    def matches(original: dict, item: dict, warning: bool) -> bool:
+    def matches(origin: _Run, original: dict, item: dict, warning: bool) -> str | None:
+        """元の記録が確認対象に合うか。証拠が同じなら "exact"、表示の確認でページ番号の図形を除いた証拠だけが
+        同じなら "footer"（番号の枠・書式・文字だけが変わったページ）、合わなければ None。"""
         if warning:
-            return original.get("kind") == "accept" and _warning_for(original, [item]) is not None
-        return (
-            original.get("kind") == item["kind"]
-            and _target_key(original) == _target_key(item)
-            and original.get("evidence_hash") == item["evidence_hash"]
-        )
+            return "exact" if original.get("kind") == "accept" and _warning_for(original, [item]) is not None else None
+        if original.get("kind") != item["kind"] or _target_key(original) != _target_key(item):
+            return None
+        if original.get("evidence_hash") == item["evidence_hash"]:
+            return "exact"
+        if item["kind"] == "visual" and _same_body(origin.manifest, new.manifest, item):
+            return "footer"
+        return None
 
-    def attempt(origin: _Run, original: dict) -> tuple[str, dict | None]:
+    def attempt(origin: _Run, original: dict, footer: bool) -> tuple[str, dict | None]:
         """元の記録を写せるか確かめ、（写せない理由、表示の照合）を返す。写せるなら理由は空である。"""
         if origin.path == target:
             return "元の記録が引き継ぎ先にある", None
@@ -1997,19 +2144,31 @@ def _carry_auto(target: Path) -> dict:
         except (OSError, ValueError):
             return "表示の画像を比べられない", None
         strong = check["strong_pixels"]
+        if footer and not check["masked"]:
+            # 証拠はページ番号の図形だけが違うが、番号の領域を除いて比べていない（番号の図形の書式の変化など）。
+            return _DIFFERENT_RENDER, check
         return ("" if strong is not None and strong <= NOISE_PIXELS else _DIFFERENT_RENDER), check
 
     def adopt(item: dict, warning: bool) -> dict | None:
         """確認対象か警告に合う元の記録を新しい順に試し、最初に写せたものの写しを返す。なければ最初の理由の件数を 1 増やす。"""
         first_reason = None
         for origin, original, via in originals:
-            if not matches(original, item, warning):
+            mode = matches(origin, original, item, warning)
+            if mode is None:
                 continue
-            reason, check = attempt(origin, original)
+            reason, check = attempt(origin, original, mode == "footer")
             if not reason:
                 sources[str(origin.path)] += 1
                 if check is not None and check["masked"] and original["slide_id"] not in renumbered:
                     renumbered.append(original["slide_id"])
+                    renumbered_from[origin.path.name] += 1
+                if mode == "footer":
+                    # 番号の図形を除いた証拠と、番号の領域を除いた画像が一致した写し。確認対象の証拠に結び付け、
+                    # 元の記録の証拠を照合の記録に残す（_valid_copy が同じ条件で確かめ直す）。
+                    check = {**check, "footer_only": True, "source_evidence_hash": original["evidence_hash"]}
+                    copy = _copy_of(original, origin.path, via, new.binding, check)
+                    copy["evidence_hash"] = item["evidence_hash"]
+                    return copy
                 return _copy_of(original, origin.path, via, new.binding, check)
             first_reason = first_reason or reason
         if first_reason:
@@ -2017,10 +2176,13 @@ def _carry_auto(target: Path) -> dict:
         return None
 
     remaining: Counter[str] = Counter()
+    pending_reasons: list[dict] = []
     for required in progress.missing:
         copy = adopt(required, False) if required["kind"] != "overview" else None
         if copy is None:
             remaining[required["kind"]] += 1
+            if required["kind"] != "overview":
+                pending_reasons.append(_pending_reason(required, originals, new.manifest))
         else:
             added.append(copy)
     for warning in progress.unaccepted:
@@ -2029,6 +2191,9 @@ def _carry_auto(target: Path) -> dict:
             remaining["warnings"] += 1
         else:
             added.append(copy)
+    # 表示環境の違いは、確認の記録がある最も新しい実行と比べる（引き継げなかった理由を示すため）。
+    compared = candidates[0] if candidates else None
+    changes = _environment_changes(compared.manifest, new.manifest) if compared is not None else []
     current = new.review
     current["records"].extend(added)
     current.setdefault("carry_attempts", []).append(
@@ -2039,6 +2204,7 @@ def _carry_auto(target: Path) -> dict:
             "records": [item["id"] for item in added],
             "skipped": dict(skipped),
             "skipped_runs": dict(skipped_runs),
+            "pending_reasons": pending_reasons,
         }
     )
     write_json(target / "review.json", current)
@@ -2051,11 +2217,95 @@ def _carry_auto(target: Path) -> dict:
         "records": added,
         "sources": dict(sources),
         "renumbered": renumbered,
+        "renumbered_from": dict(renumbered_from),
         "skipped": dict(skipped),
         "skipped_runs": dict(skipped_runs),
         "remaining": {name: remaining[name] for name in ("visual", "overview", "content", "warnings")},
+        "pending_reasons": pending_reasons,
+        "compared_run": compared.path.name if compared is not None else None,
+        "environment_changes": changes,
         "notices": notices,
     }
+
+
+def _slide_entry(manifest: dict, slide_id: Any) -> dict:
+    return next((slide for slide in manifest.get("slides") or [] if slide.get("id") == slide_id), {})
+
+
+def _pending_reason(required: dict, originals: list, manifest: dict) -> dict:
+    """引き継げなかった確認対象の理由。同じ確認対象の最も新しい元の記録の実行と、生成記録の内訳で比べる。
+
+    表示は環境の証拠（environment_hash）が違えば表示環境の変更、同じならページの表示の変更とする。
+    内容は content_parts で本文と参照する元資料・文献項目を比べる（内訳のない古い実行では「内容の変更」）。
+    """
+    entry = {key: required.get(key) for key in ("kind", "slide_id", "renderer", "variant")}
+    key = _target_key(required)
+    prior = next(
+        (
+            origin
+            for origin, original, _via in originals
+            if original.get("kind") == required["kind"] and _target_key(original) == key
+        ),
+        None,
+    )
+    if prior is None:
+        return {**entry, "reason": "前の確認の記録がない"}
+    entry["compared_run"] = prior.path.name
+    old, new = _slide_entry(prior.manifest, required.get("slide_id")), _slide_entry(manifest, required.get("slide_id"))
+    if required["kind"] == "visual":
+        name = f"{required.get('renderer')}:{required.get('variant')}"
+        before = ((old.get("visuals") or {}).get(name) or {}).get("environment_hash")
+        after = ((new.get("visuals") or {}).get(name) or {}).get("environment_hash")
+        return {**entry, "reason": "表示環境の変更" if before and after and before != after else "ページの表示の変更"}
+    before, after = old.get("content_parts"), new.get("content_parts")
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return {**entry, "reason": "内容の変更"}
+    if before.get("page") != after.get("page"):
+        return {**entry, "reason": "本文の変更"}
+    documents = sorted(
+        str(name)
+        for name in set(before.get("documents") or {}) | set(after.get("documents") or {})
+        if (before.get("documents") or {}).get(name) != (after.get("documents") or {}).get(name)
+    )
+    if documents:
+        return {**entry, "reason": "元資料の変更", "documents": documents}
+    if before.get("bibliography") != after.get("bibliography"):
+        return {**entry, "reason": "文献項目の変更"}
+    return {**entry, "reason": "内容の変更"}
+
+
+def _environment_changes(before: dict, after: dict) -> list[dict]:
+    """2 つの実行の生成記録の環境（表示ソフト・パッケージ・Python・フォント・計測の版）の違い。"""
+    old, new = before.get("environment") or {}, after.get("environment") or {}
+    changes = []
+
+    def compare(item: str, a: Any, b: Any) -> None:
+        if a != b:
+            changes.append({"item": item, "before": a, "after": b})
+
+    renderers = (old.get("renderers") or {}, new.get("renderers") or {})
+    for name in sorted(set(renderers[0]) | set(renderers[1])):
+        compare(
+            f"表示ソフト {name}",
+            (renderers[0].get(name) or {}).get("version"),
+            (renderers[1].get(name) or {}).get("version"),
+        )
+    packages = (old.get("packages") or {}, new.get("packages") or {})
+    for name in sorted(set(packages[0]) | set(packages[1])):
+        compare(name, packages[0].get(name), packages[1].get(name))
+    compare("Python", old.get("python"), new.get("python"))
+    fonts = (old.get("fonts") or {}, new.get("fonts") or {})
+    compare("計測の版", fonts[0].get("measure_version"), fonts[1].get("measure_version"))
+    compare("数式の計測の版", fonts[0].get("math_engine"), fonts[1].get("math_engine"))
+    faces = (fonts[0].get("fonts") or {}, fonts[1].get("fonts") or {})
+    for family in sorted(set(faces[0]) | set(faces[1])):
+        a, b = faces[0].get(family) or {}, faces[1].get(family) or {}
+        if (a.get("sha256"), (a.get("bold") or {}).get("sha256")) != (
+            b.get("sha256"),
+            (b.get("bold") or {}).get("sha256"),
+        ):
+            changes.append({"item": f"フォント {family}", "before": a.get("version"), "after": b.get("version")})
+    return changes
 
 
 # 残りの確認の一覧
@@ -2071,12 +2321,26 @@ def _blocking_groups(issues: list[dict]) -> list[dict]:
         group["count"] += 1
         if issue.get("path") is not None and len(group["paths"]) < _NOTICE_PATHS:
             group["paths"].append(issue["path"])
+        if issue.get("input_kind"):
+            kinds = group.setdefault("kinds", {})
+            entry = kinds.setdefault(issue["input_kind"], {"count": 0, "first": issue.get("path")})
+            entry["count"] += 1
     return list(groups.values())
 
 
 def _review_groups(state: _Run, progress: _Progress, numbers: Mapping[str, int]) -> list[dict]:
-    """確認対象を（種類、表示ソフト、表示方法）の組にまとめ、件数と未確認のページを求める。"""
+    """確認対象を（種類、表示ソフト、表示方法）の組にまとめ、件数と未確認のページを求める。
+
+    未確認のページには、最後の自動の引き継ぎが記録した引き継げなかった理由（reason・documents）を添える。
+    """
     primary = _primary(state.manifest)
+    attempts = state.review.get("carry_attempts") or []
+    last = attempts[-1] if attempts and isinstance(attempts[-1], dict) else {}
+    reasons = {
+        (item.get("kind"), item.get("slide_id"), item.get("renderer"), item.get("variant")): item
+        for item in last.get("pending_reasons") or []
+        if isinstance(item, dict)
+    }
     groups: dict[tuple, dict] = {}
     for required, matching in progress.reviews:
         kind, renderer, variant = required["kind"], required.get("renderer"), required.get("variant")
@@ -2096,7 +2360,13 @@ def _review_groups(state: _Run, progress: _Progress, numbers: Mapping[str, int])
         group["required"] += 1
         if not matching:
             slide_id = required.get("slide_id")
-            group["pending"].append({"slide_id": slide_id, "number": numbers.get(slide_id) if slide_id else None})
+            item = {"slide_id": slide_id, "number": numbers.get(slide_id) if slide_id else None}
+            known = reasons.get((kind, slide_id, renderer, variant))
+            if known is not None:
+                item["reason"] = known.get("reason")
+                if known.get("documents"):
+                    item["documents"] = known["documents"]
+            group["pending"].append(item)
             continue
         group["satisfied"] += 1
         if all(record.get("source") is not None for record in matching):
@@ -2138,6 +2408,24 @@ def _record_command(run: Path, group: dict, primary: str) -> str:
         parts += ["--slides", group["slides"]]
     parts += ["--reviewer", f'"{REVIEWER_PLACEHOLDER}"', "--note", f'"{NOTE_PLACEHOLDER}"']
     return " ".join(parts)
+
+
+def _pending_command(run: Path, status_id: str) -> str:
+    """未確認の確認をすべてまとめて記録するコマンド（review record --pending）。"""
+    return (
+        f"slidekit review record --build {_shown(run)} --pending --status-id {status_id} "
+        f'--reviewer "{REVIEWER_PLACEHOLDER}" --note "{NOTE_PLACEHOLDER}"'
+    )
+
+
+def _remaining(run: Path, cache: dict) -> dict:
+    """記録の後に残っている確認と未対応の警告の件数（種類ごと）。成果物と入力はハッシュし直さず、確認記録だけを読み直す。"""
+    progress = _Progress(run, {path: state.with_fresh_reviews() for path, state in cache.items()})
+    counts = {"visual": 0, "overview": 0, "content": 0}
+    for required in progress.missing:
+        if required.get("kind") in counts:
+            counts[required["kind"]] += 1
+    return {**counts, "warnings": len(progress.unaccepted)}
 
 
 def review_status(run: Any = "latest", *, project: Any = None) -> dict:
@@ -2206,6 +2494,9 @@ def review_status(run: Any = "latest", *, project: Any = None) -> dict:
     else:
         primary = _primary(manifest)
         operations = [_record_command(run, group, primary) for group in groups if group["pending"]]
+        if len(operations) > 1:
+            # 画像と本文をすべて見た後に、未確認の確認をまとめて 1 回で記録するコマンドを先に示す。
+            operations.insert(0, _pending_command(run, _status_id(state, "all", None, None, progress.missing)))
         operations += [
             f"slidekit review accept --build {_shown(run)} --diagnostic {warning['diagnostic_id']} "
             f'--reviewer "{REVIEWER_PLACEHOLDER}" --reason "{REASON_PLACEHOLDER}"'
@@ -2235,6 +2526,7 @@ def review_status(run: Any = "latest", *, project: Any = None) -> dict:
         "declared_warnings": declared,
         "invalid_records": progress.invalid,
         "summary": {**progress.counts, "errors": len(errors), "reviewers": progress.reviewers},
+        "status_id": _status_id(state, "all", None, None, progress.missing) if progress.missing else None,
         "next": operations,
     }
 
@@ -2367,7 +2659,7 @@ def _stage(transaction: dict, history: Path, key: str, source: Path, destination
 
 def _assert_unchanged(run: Path, manifest: dict) -> None:
     """成果物と入力を読み直し、生成記録と一致することを確かめる。"""
-    issues = [*_artifact_issues(run, manifest), *_input_issues(manifest["input_files"])]
+    issues = [*_artifact_issues(run, manifest), *_input_issues(manifest["input_files"], manifest)]
     if issues:
         first = issues[0]
         raise RecordError(f"{first['message']}: {first.get('path', run)}")
@@ -2391,12 +2683,18 @@ def export_build(run: Path) -> dict:
         checked = _evaluate(run, cache, final=True)
         write_json(run / FINAL_CHECK_FILE, checked)
         if checked["status"] != "passed":
+            # 足りない確認と未対応の警告を、記録と許容のコマンドとともに示す（review status と同じ次の操作）。
+            try:
+                operations = review_status(run)["next"]
+            except RecordError:
+                operations = []
             return {
                 "command": "export",
                 "status": "failed",
                 "exit_code": checked["exit_code"],
                 "check": checked,
                 "final_check": str(run / FINAL_CHECK_FILE),
+                "next": operations,
             }
         manifest = cache[run].manifest
         paths = _deliverable_paths(run, manifest, output)
@@ -2499,3 +2797,166 @@ def clean_runs(project: Any, before: str, apply: bool = False) -> dict:
     except ValueError as error:
         raise RecordError(str(error)) from error
     return {**result, "candidates": result["candidate_paths"]}
+
+
+# 前の実行との比較と比較画像
+
+
+def _previous_build(run: Path, cache: dict) -> _Run | None:
+    """run より前の、同じ資料の完了した実行のうち最も新しいもの（下書き・部分生成も含む）。"""
+    current = _state(cache, run)
+    for path in sorted(run.parent.iterdir(), key=_newest_first):
+        if path == run or path.is_symlink() or not path.is_dir() or not (path / "manifest.json").is_file():
+            continue
+        if _newest_first(path) <= _newest_first(run):
+            continue
+        try:
+            state = _state(cache, path)
+            manifest = state.manifest
+            if manifest["status"] == "built" and _same_project(manifest, current.manifest):
+                return state
+        except RecordError:
+            continue
+    return None
+
+
+def _page_change(origin: _Run, target: _Run, slide_id: str, key: str, *, boxes: bool = True) -> tuple[str, list]:
+    """1 ページの標準表示の画像の比較：（"unchanged"・"renumbered"・"changed"・"missing"、差のある領域）。
+
+    boxes が偽なら、差のある領域を求めない（比べた結果だけが要るとき）。
+    """
+    before, after = _visual(origin.manifest, slide_id, key), _visual(target.manifest, slide_id, key)
+    if before is None or after is None:
+        return "missing", []
+    if before["pixel_hash"] == after["pixel_hash"]:
+        return "unchanged", []
+    source, image = _artifact_path(origin.path, before["path"]), _artifact_path(target.path, after["path"])
+    masks = _footer_masks(origin.manifest, target.manifest, slide_id)
+    strong = render_difference(source, image, masks=masks)["strong_pixels"]
+    if strong is not None and strong <= NOISE_PIXELS:
+        return ("renumbered" if masks else "unchanged"), []
+    return "changed", difference_boxes(source, image, masks=masks) if boxes else []
+
+
+def compare_previous(run: Any, *, project: Any = None) -> dict | None:
+    """前の実行（_previous_build）と、主表示ソフトの標準表示のページ画像を比べる。前の実行がなければ None。
+
+    戻り値の unchanged・renumbered（ページ番号の領域を除くと同じ）・changed・added（前の実行にないページ）は
+    ページの識別子の列、removed は前の実行だけにあったページの識別子、numbers は今の実行のページ番号である。
+    """
+    run = _run_path(resolve_run(run, project=project))
+    cache: dict[Path, _Run] = {}
+    target = _state(cache, run)
+    origin = _previous_build(run, cache)
+    if origin is None:
+        return None
+    key = f"{_primary(target.manifest)}:standard"
+    result: dict[str, Any] = {
+        "run": origin.path.name,
+        "unchanged": [],
+        "renumbered": [],
+        "changed": [],
+        "added": [],
+        "removed": [],
+    }
+    previous = {slide["id"] for slide in origin.manifest["slides"]}
+    for slide in target.manifest["slides"]:
+        if _visual(target.manifest, slide["id"], key) is None:
+            continue
+        if slide["id"] not in previous:
+            result["added"].append(slide["id"])
+            continue
+        try:
+            change, _boxes = _page_change(origin, target, slide["id"], key, boxes=False)
+        except (OSError, ValueError):
+            change = "changed"
+        result["changed" if change == "missing" else change].append(slide["id"])
+    current = {slide["id"] for slide in target.manifest["slides"]}
+    result["removed"] = [slide["id"] for slide in origin.manifest["slides"] if slide["id"] not in current]
+    result["numbers"] = {slide_id: number for slide_id, number in _numbers(target.manifest).items()}
+    return result
+
+
+def review_sheet(
+    run: Any = "latest",
+    slides: str = "pending",
+    *,
+    variant: str = "all",
+    compare: bool = True,
+    project: Any = None,
+) -> dict:
+    """ページの画像を横に並べた比較画像を、実行ディレクトリの sheets/ に作る（確認の記録は書かない）。
+
+    slides は pending（表示の確認が未完了のページ）、all、番号・範囲・識別子の指定。variant は standard・fallback・all。
+    compare が真なら、前の実行（_previous_build）の標準表示の画像を左に並べ、差のある領域を今の画像に枠で示す。
+    """
+    if variant not in (*_VARIANTS, "all"):
+        raise RecordError(f"表示方法が不正である（standard、fallback、all）: {variant}")
+    run = _run_path(resolve_run(run, project=project))
+    cache: dict[Path, _Run] = {}
+    state = _state(cache, run)
+    manifest = state.manifest
+    primary = _primary(manifest)
+    text = (slides or "pending").strip()
+    if text == "pending":
+        wanted = {
+            required.get("slide_id") for required in _Progress(run, cache).missing if required.get("kind") == "visual"
+        }
+        selected = [slide["id"] for slide in manifest["slides"] if slide["id"] in wanted]
+    elif text == "all":
+        selected = [slide["id"] for slide in manifest["slides"]]
+    else:
+        selected = _select_slides(text, manifest)
+    origin = _previous_build(run, cache) if compare else None
+    numbers = _numbers(manifest)
+    variants = list(_VARIANTS) if variant == "all" else [variant]
+    columns = ([f"previous {origin.path.name}"] if origin is not None else []) + [
+        "standard" if name == "standard" else "fallback" for name in variants
+    ]
+    rows = []
+    changes: dict[str, str] = {}
+    for slide_id in selected:
+        cells: dict[str, dict] = {}
+        boxes: list = []
+        if origin is not None:
+            before = _visual(origin.manifest, slide_id, f"{primary}:standard")
+            if before is not None:
+                cells[columns[0]] = {"path": str(_artifact_path(origin.path, before["path"]))}
+                try:
+                    changes[slide_id], boxes = _page_change(origin, state, slide_id, f"{primary}:standard")
+                except (OSError, ValueError):
+                    changes[slide_id] = "changed"
+            else:
+                changes[slide_id] = "added"
+        for name in variants:
+            visual = _visual(manifest, slide_id, f"{primary}:{name}")
+            if visual is not None:
+                cells[name] = {
+                    "path": str(_artifact_path(run, visual["path"])),
+                    "boxes": boxes if name == "standard" else [],
+                }
+        if not any(name in cells for name in variants):
+            continue
+        number = numbers.get(slide_id)
+        label = (f"p.{number} " if number is not None else "") + slide_id
+        if slide_id in changes:
+            label += f" ({changes[slide_id]})"
+        rows.append({"slide_id": slide_id, "label": label, "cells": cells})
+    if not rows:
+        raise RecordError("比較画像に並べるページがない（--slides を確かめる）")
+    # どのページにも画像がない列（数式のない資料の互換表示など）は並べない。
+    columns = [column for column in columns if any(column in row["cells"] for row in rows)]
+    from .sheets import write_sheets
+
+    prefix = "pending" if text == "pending" else "sheet"
+    paths = write_sheets(rows, columns, run / "sheets", prefix)
+    return {
+        "command": "review sheet",
+        "status": "written",
+        "exit_code": 0,
+        "build": str(run),
+        "compared_run": origin.path.name if origin is not None else None,
+        "slides": [row["slide_id"] for row in rows],
+        "changes": changes,
+        "sheets": [str(path) for path in paths],
+    }

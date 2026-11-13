@@ -35,7 +35,7 @@ from .errors import ArgumentNameError, InputError
 # 断片の型は fragments にある。slidekit の公開 API が model から読み込むため、ここで読み込む。
 from .fragments import Emphasis, Math, Text, content_fragments, valid_link
 from .layout import Rect, anchor_options, as_rect, finite_number
-from .measure import layout_element, layout_text, normalize_padding
+from .measure import layout_element, layout_text, normalize_padding, phrase_wrapped_content
 from .schema import PAGE_KINDS, role_usage_problems
 
 _KINDS = frozenset({"text", "box", "equation", "image", "line", "arrow", "group"})
@@ -403,8 +403,8 @@ class Group(Element):
             raise AttributeError(name)
         if name == "stack":
 
-            def stack(area, *, gap=12):
-                return Stack(self.slide, area, gap, owner=self)
+            def stack(area, *, gap=12, avoid=None):
+                return Stack(self.slide, area, gap, owner=self, avoid=avoid)
 
             return stack
 
@@ -444,9 +444,13 @@ class Stack:
     `gap` はその要素の後の間隔（既定は stack の gap）である。領域の高さが数値なら、置いた要素に `layout_bounds` を記録し、
     領域を超えた要素は配置の検査が `layout_bounds_overflow` にする。`take` で受け取った領域が超えた分は、場面の `issues` に
     同じ識別子の診断として入る。まとまりの stack では、座標の原点はまとまりの左上である。
+
+    `avoid` は避ける領域（ページの座標の `Rect` か、"footer"（ページ番号の領域）か、その列）である。幅を指定しない要素が
+    避ける領域に重なるときは、領域の左に収まるように幅を縮めて作り直す。左に領域の幅の半分以上が残らなければ、
+    要素を避ける領域の下へ送る。幅を指定した要素は動かさない（重なりは配置の検査が示す）。
     """
 
-    def __init__(self, slide, area, gap=12, *, owner=None):
+    def __init__(self, slide, area, gap=12, *, owner=None, avoid=None):
         self._slide, self._owner = slide, owner
         try:
             area = as_rect(area)
@@ -458,6 +462,7 @@ class Stack:
         self._gap = self._spacing(gap)
         self._cursor = area.y
         self._elements = []
+        self._avoid = self._regions(avoid)
 
     # ---- 状態 ----
 
@@ -550,6 +555,42 @@ class Stack:
             raise self._error(f"{name} は正の有限値にしてください: {_shown(value)}", element_id)
         return number
 
+    def _regions(self, avoid) -> list[Rect]:
+        """避ける領域（ページの座標）。"footer" はページ番号の領域にし、番号を置かないページでは除く。"""
+        if avoid is None:
+            return []
+        items = [avoid] if isinstance(avoid, (str, Rect)) else list(avoid) if isinstance(avoid, (list, tuple)) else None
+        if items is None or (
+            isinstance(avoid, tuple) and len(avoid) == 4 and all(_option_number(v) is not None for v in avoid)
+        ):
+            items = [avoid]
+        regions = []
+        for item in items:
+            if item == "footer":
+                if self._slide.footer_area is not None:
+                    regions.append(self._slide.footer_area)
+                continue
+            try:
+                region = as_rect(item)
+            except (InputError, TypeError, ValueError):
+                raise self._error(f'avoid は Rect か "footer" か、その列で指定してください: {_shown(item)}') from None
+            if region.w is None or region.h is None:
+                raise self._error(f"避ける領域の幅と高さは数値で指定してください: {list(region)}")
+            regions.append(region)
+        return regions
+
+    def _blocking(self, element) -> Rect | None:
+        """要素（ページの座標）に重なる避ける領域のうち、最も上のもの。"""
+        x, y = self._origin()
+        rect = element.area.translated(x, y)
+        hits = [
+            region
+            for region in self._avoid
+            if min(rect.right, region.right) - max(rect.x, region.x) > _EPSILON
+            and min(rect.bottom, region.bottom) - max(rect.y, region.y) > _EPSILON
+        ]
+        return min(hits, key=lambda region: region.y) if hits else None
+
     def _origin(self) -> tuple[float, float]:
         """領域の座標の原点（ページでは (0, 0)、まとまりではその左上）。"""
         if self._owner is None:
@@ -585,6 +626,7 @@ class Stack:
         available = area.w - indent_value
         if available <= 0:
             raise self._error(f"indent {indent_value:g} pt が積み上げる領域の幅 {area.w:g} pt 以上です", element_id)
+        requested = width
         if width is None and not (kind == "image" and height is not None):
             width = available
         start = len(slide.elements)
@@ -598,6 +640,8 @@ class Stack:
                 )
             create = getattr(slide if owner is None else owner, kind)
             element = create(id=id, area=Rect(area.x + indent_value, self._cursor, width, height), **arguments)
+            if requested is None and self._avoid:
+                element = self._clear(element, create, id, start, height, indent_value, available, arguments)
             placed = element.area.w
             if placed > available + _EPSILON:
                 # 画像の縦横比や表の列幅から決まった幅が、領域に収まらない場合。
@@ -621,6 +665,26 @@ class Stack:
             raise
         self._cursor = element.area.y + element.area.h - y + (self._gap if gap is None else gap)
         self._elements.append(element)
+        return element
+
+    def _clear(self, element, create, id, start, height, indent, available, arguments):
+        """避ける領域に重なる要素を、幅を縮めるか領域の下へ送って作り直す（最大 4 回）。"""
+        slide, area = self._slide, self._area
+        ox, oy = self._origin()
+        left = area.x + indent
+        width, top = element.area.w, element.area.y
+        for _ in range(4):
+            region = self._blocking(element)
+            if region is None:
+                break
+            room = region.x - ox - min(self._gap, 8.0) - left
+            if region.x - ox > left + _EPSILON and room >= available / 2:
+                width = room
+            else:
+                top = max(top, region.bottom - oy + self._gap)
+                width = available
+            del slide.elements[start:]
+            element = create(id=id, area=Rect(left, top, width, height), **arguments)
         return element
 
 
@@ -724,7 +788,7 @@ class Deck:
             "metadata": copy.deepcopy(self.project.config["metadata"]),
             "theme": copy.deepcopy(self.project.theme),
             "rules": copy.deepcopy(self.project.rules),
-            "slides": [slide.to_dict(number) for number, slide in enumerate(self.slides, 1)],
+            "slides": [slide.to_dict(number, len(self.slides)) for number, slide in enumerate(self.slides, 1)],
         }
         has_math = any(
             fragment["kind"] == "math"
@@ -1916,9 +1980,22 @@ class Slide:
         except ValueError as error:
             raise self._locate(error, None) from None
 
-    def stack(self, area, *, gap=12):
-        """area の上から順に、gap の間隔で要素を置く補助（`Stack`）を返す。area の高さは None でもよい。"""
-        return Stack(self, area, gap)
+    @property
+    def footer_area(self) -> Rect | None:
+        """ページ番号の領域（ページ種別の footer_area_pt、なければページの右下の幅 36 pt・高さ 20 pt）。番号を置かないページは None。"""
+        settings = self.kind_settings
+        if not settings.get("page_number", False):
+            return None
+        w, h = _page_size(self.project)
+        return as_rect(settings["footer_area_pt"]) if "footer_area_pt" in settings else Rect(w - 72, h - 28, 36, 20)
+
+    def stack(self, area, *, gap=12, avoid=None):
+        """area の上から順に、gap の間隔で要素を置く補助（`Stack`）を返す。area の高さは None でもよい。
+
+        avoid は避ける領域（`Rect` か "footer"（ページ番号の領域）か、その列）。幅を指定しない要素が重なるときは、
+        幅を縮めるか、領域の下へ送る。
+        """
+        return Stack(self, area, gap, avoid=avoid)
 
     def _taken_overflow_issues(self, number, make_diagnostic) -> list[dict]:
         """stack.take で受け取った領域が積み上げる領域を超えた分の診断（layout_bounds_overflow）。
@@ -1992,8 +2069,11 @@ class Slide:
             element["allow_roles"] = [role]
         return plain, element
 
-    def _theme_elements(self, number):
+    def _theme_elements(self, number, total=None):
         """テーマの要素を描く順（背景、ページ種別の飾り、題名、ページ番号）に返す。
+
+        ページ番号の文字は、ページ種別の page_number_format の {page} をページ番号に、{total} を全体のページ数に置き換えて作る。
+        total を省くと、全体のページ数をページ番号と同じとみなす。
 
         ページ種別の background が "none" なら背景の図形を作らない（雛形のマスターの図形を見せるとき）。
         """
@@ -2027,8 +2107,11 @@ class Slide:
         if self._title is not None:
             result.append(copy.deepcopy(self._title))
         if settings.get("page_number", False):
-            content = content_fragments(str(number))
-            area = as_rect(settings["footer_area_pt"]) if "footer_area_pt" in settings else Rect(w - 72, h - 28, 36, 20)
+            label = settings.get("page_number_format", "{page}").format(
+                page=number, total=number if total is None else total
+            )
+            content = content_fragments(label)
+            area = self.footer_area
             _, style = self._style(
                 "text",
                 "note",
@@ -2176,7 +2259,7 @@ class Slide:
 
     # ---- 場面のページ ----
 
-    def to_dict(self, number):
+    def to_dict(self, number, total=None):
         notes = "" if self.notes is None else self.notes
         if not isinstance(notes, str):
             raise InputError(
@@ -2188,7 +2271,7 @@ class Slide:
             raise InputError(f"ページ {self.id}: {error}", code="input_error", slide_id=self.id) from None
         if seconds is not None and seconds < 0:
             raise InputError(f"ページ {self.id}: 説明時間は 0 以上にしてください", code="input_error", slide_id=self.id)
-        elements = self._theme_elements(number)
+        elements = self._theme_elements(number, total)
         lookup = {element.id: element for element in self.elements}
         for element in self.elements:
             data = copy.deepcopy(element.data)
@@ -2221,6 +2304,13 @@ class Slide:
             if data["kind"] == "image" and "image_size" in data:
                 # PNG・JPEG の表示範囲（PDF・SVG は素材の準備が変換後の画素数で決める）。
                 data["actual_area"] = list(element._visible_area())
+            style = data.get("style") or {}
+            if data["kind"] in ("text", "box", "equation") and style.get("phrase_wrap") and style.get("word_wrap"):
+                # 文節の境で折り返した位置に明示改行を入れる（PowerPoint は和文の文字の間ならどこでも折り返すため）。
+                try:
+                    data["content"] = phrase_wrapped_content(data, self.project.fonts)
+                except InputError:
+                    pass  # 計測できない要素は、配置の検査が診断で示す
             if any(fragment["kind"] == "math" for fragment in data["content"]):
                 current, seen = element, set()
                 while current:

@@ -10,11 +10,14 @@
   [ の右端と基線を原点にした (左, 右, 基線より上, 基線より下) にする。枠の上端より上の描画は、枠の中の描画に続く分だけを
   含める（上の行の式が枠の下へはみ出した描画を拾わない）。
 - 独立した数式は、枠の範囲を 8 px/pt で画像化した描画範囲の幅と高さ。
+- 描画が計測画像の上下端に接する式は、切り取られた可能性があるため測定不能とし、照合データに入れない。
 - 数式の書体は資料の実行環境で解決し、ファイル名・書体番号・版・sha256 を書く。照合データにパスは書かない。
 - 書き出しに失敗する式（未対応の命令など）は、照合データに入れず、標準エラーに示す。
 
 作業ディレクトリの既定は一時フォルダーの slidekit-powerpoint-math/（--measure-only で使い回す。終わったら消してよい）。
 作り直す時期：PowerPoint・数式の書体の版を変えたとき、数式の組み方を変えたとき。差分を確かめてから入れ替える。
+共通の入口 tools/calibrate.py（設定ファイルの deck = "math"）は、この道具の資料と計測を slidekit build の実行で使い、
+既存の照合データとの比較と採用（adopt）を別の手順にする。
 """
 
 from __future__ import annotations
@@ -32,8 +35,10 @@ SCALE = 8  # 描画範囲を求める画像の倍率（px/pt）
 DEFAULT_WORK = Path(tempfile.gettempdir()) / "slidekit-powerpoint-math"
 MARK_FONT = "Arial"
 COLUMNS = (24.0, 336.0, 648.0)  # 枠の左端（16:9 の資料、幅 300 pt）
-INLINE_ROWS, INLINE_HEIGHT = 8, 56.0
-DISPLAY_ROWS, DISPLAY_HEIGHT = 6, 80.0
+# 入れ子の分数や伸びる括弧の描画全体が入る高さを確保する。枠から出た部分を切り取ると、
+# PowerPoint の実際の寸法より小さい照合データになり、計測の誤差と区別できない。
+INLINE_ROWS, INLINE_HEIGHT = 4, 112.0
+DISPLAY_ROWS, DISPLAY_HEIGHT = 4, 112.0
 FRAME_WIDTH = 288.0
 ROW_GAP = 8.0  # 上下の枠の間（pt）
 
@@ -199,6 +204,34 @@ EXPRESSIONS = (
     r"x\underset{i}{\max} y",
     r"\text{“ab”}",
     r"\text{a×b}",
+    # 背の高い括弧、上下に偏る中身、独立した数式の入れ子の分数、上付きの中の横書きの分数。
+    r"\left(\frac{\frac{a}{b}}{c}\right)",
+    r"\left(\frac{a}{\frac{b}{c}}\right)",
+    r"\frac{\frac{a}{b}}{c}",
+    r"\frac{a}{\frac{b}{c}}",
+    r"\left(\sqrt{\frac{a}{b}}\right)",
+    r"\left(\sum_{i=1}^{n} a_i\right)",
+    r"\left(\sum\limits_{i=1}^{n} a_i\right)",
+    r"\left(x_i\right)",
+    r"\left(\frac{x}{y}\right)",
+    r"\left(\frac{x}{y^2}\right)",
+    r"\left[\frac{\frac{a}{b}}{c}\right]",
+    r"\left\{\sqrt{\frac{a}{b}}\right\}",
+    r"\left|\frac{a}{\frac{b}{c}}\right|",
+    r"\frac{\frac{2\text{b}}{3}}{4}",
+    r"x^{\frac{a}{b}}",
+    r"m^{1/4}",
+    r"2^{\lceil a/2\rceil}",
+    # 括弧の中心を切り替える高さの境界を、文字と数字、分子と分母の両側で確かめる。
+    r"\left(x^{y^z}\right)",
+    r"\left(x_{y_z}\right)",
+    r"\left(\frac{a}{b^2}\right)",
+    r"\left(\frac{a^2}{b^2}\right)",
+    r"\left(\frac{\frac{a}{b}}{\frac{c}{d}}\right)",
+    r"\left(\frac{\frac{1}{2}}{3}\right)",
+    r"\left(\frac{1}{\frac{2}{3}}\right)",
+    r"\left(\frac{a+b}{c}\right)",
+    r"\left(\frac{\sqrt{a}}{b}\right)",
 )
 
 DECK_TOML = """# 数式の計測の照合データを作る資料（tests/tools/powerpoint_math_data.py が作る。内容は汎用の式だけ）。
@@ -386,8 +419,17 @@ def connected_ink_box(page, rect, top, scale=SCALE):
     return _box_pt((left, upper + first, right, lower + first), origin, scale)
 
 
+def _vertically_clipped(page, rect, box, scale):
+    """選んだ描画範囲が計測画像の上下端に接するか。ページの端で切り詰めた場合も含む。"""
+    from slidekit.pdf import Box
+
+    _, top, _, bottom = Box.of(rect).pixels(scale)
+    _, page_top, _, page_bottom = page.rect.pixels(scale)
+    return box[1] <= max(top, page_top) / scale or box[3] >= min(bottom, page_bottom) / scale
+
+
 def measure_inline(page, area, *, math_font="Cambria Math", scale=SCALE) -> dict | None:
-    """目印の [ と ] で挟んだ文中の数式の送り幅と描画範囲。目印が見つからなければ None。"""
+    """目印の [ と ] で挟んだ文中の数式の送り幅と描画範囲。目印がないか、描画の上下端を切り取った疑いがあれば None。"""
     from slidekit.pdf import Box
 
     x, y, width, height = area
@@ -396,13 +438,22 @@ def measure_inline(page, area, *, math_font="Cambria Math", scale=SCALE) -> dict
     # 枠の中の描画に描画のない行を挟まずに続く分だけを含める（connected_ink_box）。
     rect = Box(x - 2, y - ROW_GAP / 2, x + width + 2, y + height + 2)
     key = _font_key(math_font)
-    marks = [char for char in _chars(page, rect) if _font_key(char["font"]) != key]
-    opening = next((char for char in marks if char["c"] == "["), None)
-    closing = next((char for char in reversed(marks) if char["c"] == "]"), None)
-    if opening is None or closing is None or closing["origin"][0] <= opening["bbox"][2]:
+    # PDF の文字対応表によっては [ と ] の文字コードが逆になる。角括弧の左右は描画位置で決め、
+    # 数式の text に角括弧が含まれていても、外側の 2 つだけを目印にする。
+    marks = sorted(
+        (char for char in _chars(page, rect) if char["c"] in {"[", "]"} and _font_key(char["font"]) != key),
+        key=lambda char: char["origin"][0],
+    )
+    if len(marks) < 2:
+        return None
+    opening, closing = marks[0], marks[-1]
+    if closing["origin"][0] <= opening["bbox"][2]:
         return None
     start, end, baseline = opening["bbox"][2], closing["origin"][0], opening["origin"][1]
-    box = connected_ink_box(page, Box(start + 0.05, rect.y0, end - 0.05, rect.y1), y, scale)
+    math_rect = Box(start + 0.05, rect.y0, end - 0.05, rect.y1)
+    box = connected_ink_box(page, math_rect, y, scale)
+    if box is not None and _vertically_clipped(page, math_rect, box, scale):
+        return None
     ink = (
         None
         if box is None
@@ -417,10 +468,11 @@ def measure_inline(page, area, *, math_font="Cambria Math", scale=SCALE) -> dict
 
 
 def measure_display(page, area, *, scale=SCALE) -> dict | None:
-    """独立した数式の枠の描画範囲の幅と高さ。何も描かれていなければ None。"""
+    """独立した数式の枠の描画範囲の幅と高さ。描画がないか、上下端を切り取った疑いがあれば None。"""
     x, y, width, height = area
-    box = ink_box(page, (x - 2, y - 2, x + width + 2, y + height + 2), scale)
-    if box is None:
+    rect = (x - 2, y - 2, x + width + 2, y + height + 2)
+    box = ink_box(page, rect, scale)
+    if box is None or _vertically_clipped(page, rect, box, scale):
         return None
     return {"ink_width_pt": round(box[2] - box[0], 3), "ink_height_pt": round(box[3] - box[1], 3)}
 

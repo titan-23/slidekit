@@ -507,7 +507,7 @@ def test_tall_math_extends_line(synthetic_environment):
     assert [line.baseline for line in below.lines] == pytest.approx([18, 18 + 6 + 26])
     assert below.content_height == pytest.approx(50 + 8)
     spaced = layout_text(content("a", ("math", r"\hat{T}")), style(line_spacing=1.5), fonts)
-    assert spaced.lines[0].baseline == pytest.approx(1.5 * 26)  # 数式の箱にも行間を掛ける
+    assert spaced.lines[0].baseline == pytest.approx(0.75 * 1.5 * (26 + 8))  # 行全体に行間を掛け、4 分の 3 を上に置く
 
 
 STACKED = (
@@ -550,13 +550,13 @@ def test_stacked_math_line_top_follows_ink(expression):
     1.17 × 行間 × インクの上以上、ちょうど 1 のとき 1.22 × インクの上以上）にする。根号の外に上へ出る部分
     （上付きの添字・上に置くもの・アクセント・上線）がある式は、インクの上が根号の上とは限らないので当てない。
     分数などが添字の中（添字の土台の中は除く）か、上に置くもの（\\overset）の中にあるだけの式と、普通の括弧・横書きの分数
-    などの式は、背が高くても数式の計測の上側に行間を掛けた値にする（PowerPoint は添字の中の分数と上に置くものの行に
-    規則を使わない）。行間がちょうど 1 の行では、その上側をインクの上 + 0.147 em より小さくしない。"""
+    などの式は、行間 1.0 の上側と文字の下側の和に行間を掛け、4 分の 3 を上に置く。独立した数式だけの行では
+    数式の計測の上側に行間を掛ける。行間がちょうど 1 の行では、その上側をインクの上 + 0.147 em より小さくしない。"""
     fonts = FakeFonts(math_ascent=1.0, math_descent=0.1)  # インクの上下の和 1.1 em。行の上側 1.0 em
     # 下に置くもの：a = 1.147 em（書体の組の行間 1.0 の上側 0.9 em より大きい）、d = 0.1 em、h = 1.247 em。
-    # 行間 1.2 で増える分 0.2 h は 1.17 d より大きいので、4 分の 3 を上に置く。
-    under = 1.147 + 0.75 * 0.2 * 1.247
-    tops = {1.0: (1.2, 1.147, 1.22, 1.147), 1.2: (1.2 * 1.2, under, 1.17 * 1.2, 1.2)}
+    # 行間 1.2 では全高の 4 分の 3 の上限に当たり、計測の行の上 × 行間（1.2 em）が下限になる。
+    under = 1.2
+    tops = {1.0: (1.2, 1.147, 1.22, 1.147), 1.2: (1.2 * 1.2, under, 1.17 * 1.2, 0.75 * 1.2 * (1.147 + 0.3))}
     for spacing, (stacked, below, radical, other) in tops.items():
         layout = layout_text(content(("math", expression)), style(line_spacing=spacing), fonts)
         top = (
@@ -567,7 +567,7 @@ def test_stacked_math_line_top_follows_ink(expression):
         assert layout.lines[0].baseline == pytest.approx(top * 20), spacing
         # 独立した数式の根号は規則に当てない（独立した数式の背の高い根号は、行間を掛けた計測の上下で合った）。
         display = layout_text(content(("math", expression)), style(line_spacing=spacing), fonts, display=True)
-        top = stacked if expression in STACKED else below if expression in UNDER else other
+        top = stacked if expression in STACKED else below if expression in UNDER else 1.147 if spacing == 1.0 else 1.2
         assert display.lines[0].baseline == pytest.approx(top * 20), spacing
     # インクの上下の和が文字サイズ以下なら、どの式も規則に当てない（行間 1.0 でも、インクの上 + 0.147 em は 0.9 em より低い）。
     for spacing in (1.0, 1.2):
@@ -628,13 +628,11 @@ def test_stacked_math_line_follows_ink_and_spacing():
             2.0: (a + 0.75 * h) * 20,
         }
     )
-    # 下が浅い式は、同じ行間でも早く 4 分の 3 に切り替わる（1.17 d = 0.351 em。行間 1.15 の e は 0.277 em、1.2 は 0.369 em）。
+    # 上に偏る式は、全高の 4 分の 3 の上限に当たる。この例では計測の行の上 × 行間がさらに大きい。
     a, h = 1.547, 1.847  # \int_0^1 f
     shallow = {spacing: first(r"\int_0^1 f", spacing).lines[0].baseline for spacing in (1.15, 1.2)}
-    assert shallow == pytest.approx({1.15: (a + 0.15 * h) * 20, 1.2: (a + 0.75 * 0.2 * h) * 20})
-    assert first(r"\int_0^1 f", 1.2, display=True).content_height - shallow[1.2] == pytest.approx(
-        (0.3 + 0.25 * 0.2 * h) * 20
-    )
+    assert shallow == pytest.approx({1.15: 1.15 * 1.4 * 20, 1.2: 1.2 * 1.4 * 20})
+    assert first(r"\int_0^1 f", 1.2, display=True).content_height - shallow[1.2] == pytest.approx((0.25 * 1.2 * h) * 20)
     # 独立した数式だけの行の文字ブロックは、上側と下側の和（行間 sp では sp × h）。
     a, h = 1.347, 2.047
     for spacing in spacings:
@@ -647,12 +645,12 @@ def test_stacked_math_line_follows_ink_and_spacing():
             r"\sqrt{\frac{a}{b}}": (1.547 + 0.2 * 2.347) * 20,
             r"\left(x^2\right)": 1.2 * 1.2 * 0.8 * 20,
             r"\sum_i a_i": 1.2 * 1.3 * 20,
-            # 規則に当たらない式は、書体の組の上側（1.2 × 0.9 em）と数式の計測の行の上 × 行間の大きいほう。
-            r"\dfrac{1}{n}": 1.2 * 0.9 * 20,
+            # 通常の数式で行が広がるときは全高の 4 分の 3 を基線の上に置き、低い式では文字の上側を保つ。
+            r"\dfrac{1}{n}": 0.75 * 1.2 * (0.9 + 0.147 + 0.3) * 20,
             r"\left(x\right)": 1.2 * 0.9 * 20,
             # 下が書体の組の下（0.3 em）より深い分の 0.5 × 行間を、行の上側に加える（test_deep_math_lowers_spaced_line）。
             r"x_{\frac{1}{2}}": (1.2 * 0.9 + 0.5 * 1.2 * (0.6 - 0.3)) * 20,
-            r"\int_0^1 f": (1.547 + 0.75 * 0.2 * 1.847) * 20,
+            r"\int_0^1 f": 1.2 * 1.4 * 20,
         }
     )
 
@@ -688,6 +686,94 @@ def test_stacked_math_line_bottom_has_no_spacing():
     # 規則に当たらない添字の中の分数（d = 0.6 em）：最後の行の下側は d。行の上側には 0.5 × 行間 ×（d − 0.3 em）を加える。
     script = layout_text(content(("math", r"x_{\frac{1}{2}}")), style(line_spacing=1.2), fonts)
     assert script.content_height == pytest.approx((1.2 * 0.9 + 0.5 * 1.2 * 0.3 + 0.6) * 20)
+
+
+def _nested_fraction_fonts(display=False):
+    # 20 pt の Cambria Math の組版・描画の上下と、Arial の usWin の値。
+    ascent, descent = (40.478515625, 13.544921875) if display else (29.845703125, 10.1869140625)
+    return FakeFonts(ascent=1854 / 2048, descent=434 / 2048, math_ascent=ascent / 20, math_descent=descent / 20)
+
+
+@pytest.mark.parametrize(
+    "mode,size,baselines",
+    [
+        ("inline", 12, [19.7, 22.22, 23.23, 29.06, 38.66]),
+        ("inline", 20, [32.83, 37.1, 38.66, 48.43, 64.46]),
+        ("inline", 32, [52.46, 59.35, 61.94, 77.3, 103.18]),
+        ("display", 12, [26.048, 29.528, 30.728, 38.408, 51.248]),
+        ("display", 20, [43.453, 49.093, 51.253, 64.093, 85.453]),
+        ("display", 32, [69.561, 78.681, 82.161, 102.561, 136.761]),
+    ],
+)
+def test_nested_fraction_line_matches_powerpoint(mode, size, baselines):
+    """PowerPoint 16.0.20430.20182 の 2026-10-24 の実測。上に偏る分数を行間で下げすぎない。
+
+    文中は Arial の目印、独立した式は外側の分数線と数学軸から基線を求めた。
+    行間 1.0 を保ちつつ、1.15〜2.0 と 12〜32 pt で全高の 4 分の 3 の上限を確かめる。
+    """
+    display = mode == "display"
+    fonts = _nested_fraction_fonts(display)
+    expr = r"\frac{\frac{a}{b}}{c}"
+    parts = (("math", expr),) if display else ("[", ("math", expr), "]")
+    for spacing, baseline in zip((1.0, 1.15, 1.2, 1.5, 2.0), baselines):
+        layout = layout_text(content(*parts), style(size_pt=size, line_spacing=spacing), fonts, display=display)
+        assert layout.lines[0].baseline == pytest.approx(baseline, abs=0.25), spacing
+
+
+@pytest.mark.parametrize(
+    "size,spacing,baselines",
+    [
+        (12, 1.0, [11.66, 34.1, 51.86]),
+        (12, 1.2, [12.98, 40.46, 61.22]),
+        (12, 1.5, [16.22, 50.66, 76.46]),
+        (12, 2.0, [21.62, 67.46, 102.04]),
+        (20, 1.0, [19.46, 56.78, 86.42]),
+        (20, 1.2, [21.62, 67.46, 102.04]),
+        (20, 1.5, [27.02, 84.38, 127.48]),
+        (20, 2.0, [36.02, 112.48, 169.96]),
+        (32, 1.0, [31.1, 90.86, 138.28]),
+        (32, 1.2, [34.58, 108.04, 163.12]),
+        (32, 1.5, [43.22, 134.92, 203.92]),
+        (32, 2.0, [57.62, 179.92, 271.98]),
+    ],
+)
+def test_nested_fraction_multiline_matches_powerpoint(size, spacing, baselines):
+    """分数の行の基線だけでなく、前後の通常文字の行送りも PowerPoint の実測と照合する。"""
+    layout = layout_text(
+        content("First line\nValue [", ("math", r"\frac{\frac{a}{b}}{c}"), "]\nLast line"),
+        style(size_pt=size, line_spacing=spacing),
+        _nested_fraction_fonts(),
+    )
+    assert [line.baseline for line in layout.lines] == pytest.approx(baselines, abs=0.25)
+
+
+@pytest.mark.parametrize(
+    "mode,valign,baselines",
+    [
+        ("inline", "middle", [131.32, 134.3, 139.14, 147.16]),
+        ("inline", "bottom", [229.86, 229.896, 229.944, 229.86]),
+        ("display", "middle", [134.973, 137.073, 141.373, 148.493]),
+        ("display", "bottom", [226.493, 222.903, 218.653, 211.533]),
+    ],
+)
+def test_nested_fraction_vertical_alignment_matches_powerpoint(mode, valign, baselines):
+    """縦の揃えを変えて、数式の上限を下げた分が行の下側へ回ることも実測で確かめる。"""
+    display = mode == "display"
+    fonts = _nested_fraction_fonts(display)
+    expr = r"\frac{\frac{a}{b}}{c}"
+    parts = (("math", expr),) if display else ("[", ("math", expr), "]")
+    for spacing, baseline in zip((1.0, 1.2, 1.5, 2.0), baselines):
+        layout = layout_element(
+            element(
+                *parts,
+                kind="equation" if display else "text",
+                area=(0, 0, 292, 240),
+                line_spacing=spacing,
+                valign=valign,
+            ),
+            fonts,
+        )
+        assert layout.block_top + layout.text.lines[0].baseline == pytest.approx(baseline, abs=0.25), spacing
 
 
 def test_deep_math_lowers_spaced_line():
@@ -798,7 +884,8 @@ def test_underset_rule_has_floor_of_single_spacing_top():
 
 def test_single_spacing_math_line_top_follows_ink():
     """行間がちょうど 1 の行では、規則に当たらない数式の行の上側を、数式の計測の行の上とインクの上 + 0.147 em の
-    大きいほうにする（PowerPoint の \\overset{n}{x}、20 pt の上揃えで確かめた。行間 1 より大きい行は行間 × 計測の行の上）。"""
+    大きいほうにする（PowerPoint の \\overset{n}{x}、20 pt の上揃えで確かめた）。行間 1 より大きい文字の段落では、
+    行間 1.0 の上側と文字の下側の和に行間を掛け、4 分の 3 を上に置く。"""
     over = r"\overset{n}{x}"
     fonts = FakeFonts(math_boxes={over: (0.6, 1.05, 0.0, 1.05, 0.0)})
     assert layout_text(content(("math", over)), style(), fonts).lines[0].baseline == pytest.approx((1.05 + 0.147) * 20)
@@ -807,7 +894,47 @@ def test_single_spacing_math_line_top_follows_ink():
     )
     for spacing in (1.02, 1.5):
         line = layout_text(content(("math", over)), style(line_spacing=spacing), fonts)
-        assert line.lines[0].baseline == pytest.approx(spacing * 1.05 * 20), spacing
+        assert line.lines[0].baseline == pytest.approx(0.75 * spacing * (1.05 + 0.147 + FAKE_BOTTOM) * 20), spacing
+
+
+@pytest.mark.parametrize(
+    "size,spacing,baseline",
+    [
+        (12, 1.0, 12.62),
+        (12, 1.15, 13.22),
+        (12, 1.2, 13.82),
+        (12, 1.5, 17.19),
+        (20, 1.0, 21.03),
+        (20, 1.15, 21.99),
+        (20, 1.2, 22.99),
+        (20, 1.5, 28.75),
+        (32, 1.0, 33.67),
+        (32, 1.15, 35.25),
+        (32, 1.2, 36.81),
+        (32, 1.5, 46.05),
+    ],
+)
+def test_superscript_fraction_line_matches_powerpoint(size, spacing, baseline):
+    """PowerPoint 16.0.20430.20182 の 2026-10-23 の実測。Arial の目印 [ の基線を比べる。
+
+    書体の上下は Arial、数式の寸法は Cambria Math の m^{1/4} の値を固定する。実フォントがなくても、
+    式のインクをそのまま行間倍して 0.8〜2.7 pt 高く置く問題が再発しないことを確かめる。
+    """
+    fonts = FakeFonts(
+        ascent=1854 / 2048,
+        descent=434 / 2048,
+        math_ascent=18.128076171875 / 20,
+        math_descent=0.15625 / 20,
+    )
+    layout = layout_text(content("[", ("math", "m^{1/4}"), "]"), style(size_pt=size, line_spacing=spacing), fonts)
+    assert layout.lines[0].baseline == pytest.approx(baseline, abs=0.25)
+    if size == 32 and spacing == 1.5:
+        paragraph = layout_text(
+            content("First line\nValue [", ("math", "m^{1/4}"), "]\nLast line"),
+            style(size_pt=size, line_spacing=spacing),
+            fonts,
+        )
+        assert [line.baseline for line in paragraph.lines] == pytest.approx([43.28, 103.64, 162.1], abs=0.5)
     # 低い式は書体の組の上側のまま（0.7 + 0.147 em < 0.9 em）。
     assert layout_text(content("a ", ("math", "x")), style(), FakeFonts()).lines[0].baseline == pytest.approx(0.9 * 20)
 
@@ -1166,7 +1293,7 @@ def test_frames_from_measurement_hold_their_lines(shape, radius):
     assert texts(placed.text) == texts(measured)
     assert placed.inner.h >= measured.content_height - 1e-9
     assert placed.inner.w == pytest.approx(measured.available_width)
-    assert not [item for item in fit_findings(placed) if item["code"] != "text_wrap_near_limit"]
+    assert not [item for item in fit_findings(placed) if item["severity"] != "info"]
     # 幅も内容から決めた枠は、折り返す要素でも同じ行のまま置くことができ、誤差の範囲の行も出ない。
     natural = layout_text(content("あいう\nabc de"), style(**options), fonts, shape=shape)
     assert natural.available_width is None and natural.width >= natural.content_width + 0.25
@@ -1415,6 +1542,101 @@ def test_fit_findings_use_ink_and_frame_tolerance():
     assert fit_findings(layout_element(element("   "), fonts)) == []
 
 
+def test_math_ink_overhang_reaches_fit_findings():
+    """数式の描画範囲の左右（入れ子の分数の線など）は文字の送りを変えず、インクの左右とはみ出しの検査に使う。"""
+    # 送り幅 1 em、描画は左へ 0.1 em、右へ 0.05 em 張り出す（20 pt で 2 pt と 1 pt）。
+    fonts = FakeFonts(math_boxes={"n": (1.0, 0.7, 0.1, 0.7, 0.1, -0.1, 1.05)})
+    placed = layout_element(element(("math", "n"), "b", area=(10, 0, 200, 40)), fonts)
+    line = placed.text.lines[0]
+    assert (line.width, line.overhang_left, line.overhang_right) == pytest.approx((20 + 10, 2, 0))
+    assert placed.ink.x == pytest.approx(8) and placed.ink.right == pytest.approx(40)
+    # 行末の数式は右へ張り出す。行の幅と左端は送り幅のまま。
+    tail = layout_element(element("b", ("math", "n"), area=(10, 0, 200, 40)), fonts)
+    assert tail.text.lines[0].overhang_right == pytest.approx(1) and tail.line_left == (10,)
+    assert tail.ink.right == pytest.approx(10 + 30 + 1)
+    # 枠いっぱいの数式の左への張り出しは、線のない枠の許容（1.5 pt）を超えるとはみ出しになる。
+    findings = fit_findings(layout_element(element(("math", "n"), area=(0, 0, 40, 40)), fonts))
+    assert [item["code"] for item in findings] == ["text_overflow"]
+    assert findings[0]["observations"]["overflow_pt"] == {"side": "left", "amount": 2.0}
+    # 余白の中の張り出しは text_padding_overlap になる。
+    padded = fit_findings(layout_element(element(("math", "n"), area=(0, 0, 40, 40), padding_pt=4), fonts))
+    assert [(item["code"], item["observations"]["overflow_pt"]) for item in padded] == [
+        ("text_padding_overlap", {"side": "left", "amount": 2.0})
+    ]
+    # 描画範囲を持たない箱（古い FontSource）は送り幅の範囲とみなす。
+    plain = layout_element(element(("math", "x"), area=(10, 0, 200, 40)), FakeFonts())
+    assert (plain.text.lines[0].overhang_left, plain.text.lines[0].overhang_right) == (0, 0)
+
+
+def test_superscript_fragment_is_narrower_and_raised():
+    """上付きの断片は 3 分の 2 の大きさの送り幅で並べ、インクを文字サイズの 30 % 上げる（PowerPoint 16.0 の PDF で確かめた）。"""
+    fonts = FakeFonts()  # 0.5 em、インクは基線の 0.7 em 上から 0.1 em 下まで
+    plain = layout_text(content("ab", "12"), style(), fonts)
+    raised = layout_text(content("ab", ("text", "12", {"superscript": True})), style(), fonts)
+    assert plain.lines[0].width == pytest.approx(40)
+    assert raised.lines[0].width == pytest.approx(20 + 20 * 2 / 3)
+    # 上付きの字形のインクの上端は 0.7 × 20 × 2/3 + 6 = 15.33 pt で、通常の 14 pt より高い。行の位置は変えない。
+    assert raised.lines[0].ink_top == pytest.approx(0.7 * 20 * 2 / 3 + 6)
+    assert raised.lines[0].baseline == plain.lines[0].baseline
+
+
+def test_wrap_kinds_and_wrap_findings():
+    """自動の折り返しの種類（文節の途中・ハイフンの後など）と、短い最後の行の参考。"""
+    fonts = FakeFonts()  # 和文も欧文も 0.5 em（20 pt で 10 pt）
+    placed = layout_element(element("届いたため、次へ進む", area=(0, 0, 40, 200)), fonts)
+    lines = placed.text.lines
+    assert [(line.text, line.wrap, line.characters) for line in lines] == [
+        ("届いたた", "mid_phrase", 4),
+        ("め、次へ", "phrase", 4),
+        ("進む", None, 2),
+    ]
+    findings = {item["code"]: item for item in fit_findings(placed)}
+    assert findings["text_wrap_mid_phrase"]["severity"] == "info"
+    observed = findings["text_wrap_mid_phrase"]["observations"]
+    assert (observed["wrapped_lines"], observed["breaks"]) == ([1], ["届いたた / め、次へ"])
+    short = findings["text_short_line"]["observations"]
+    assert (short["short_lines"], short["short_texts"]) == ([3], ["進む"])
+    # 欧文の語のハイフンの後の折り返しと、空白の後の折り返し。
+    hyphen = layout_element(element("abc (time-fusible) de", area=(0, 0, 110, 200)), fonts)
+    assert [line.wrap for line in hyphen.text.lines] == ["hyphen", None]
+    assert fit_findings(hyphen)[-1]["code"] == "text_wrap_hyphen"
+    spaced = layout_element(element("aaaa bbbb cccc dddd", area=(0, 0, 100, 200)), fonts)
+    assert [line.wrap for line in spaced.text.lines] == ["space", None]
+    assert not [
+        item for item in fit_findings(spaced) if item["code"].startswith("text_wrap_") or "short" in item["code"]
+    ]
+    # 明示改行で分けた短い行と、折り返さない要素は対象外。
+    assert not fit_findings(layout_element(element("長い本文の行\nです", area=(0, 0, 200, 200)), fonts))
+    unwrapped = layout_element(element("届いたため、次へ進む", area=(0, 0, 40, 200), word_wrap=False), fonts)
+    assert [line.wrap for line in unwrapped.text.lines] == [None]
+    # 内側の幅の 2 割未満の最後の行も短い行にする（3 文字以上でも）。
+    wide = layout_element(element("aaaa bbbb cccc dddd eeee ffff ggg", area=(0, 0, 160, 200)), fonts)
+    assert wide.text.lines[-1].text == "ggg"
+    assert "text_short_line" in {item["code"] for item in fit_findings(wide)}
+
+
+def test_wrap_kinds_without_phrase_model(monkeypatch):
+    """BudouX を読み込むことができなければ、和文の折り返しは other にし、文節の参考を出さない。"""
+    monkeypatch.setattr(measure, "_phrase_parser", False)
+    placed = layout_element(element("届いたため、次へ進む", area=(0, 0, 40, 200)), FakeFonts())
+    assert [line.wrap for line in placed.text.lines] == ["other", "other", None]
+    assert "text_wrap_mid_phrase" not in {item["code"] for item in fit_findings(placed)}
+
+
+def test_overflow_reports_wrapped_lines_and_single_line_width():
+    """はみ出しの観測値に、明示改行の行数、1 行に収めるのに要る内側の幅、高さの不足を加える。"""
+    fonts = FakeFonts()
+    placed = layout_element(element("aaaa bbbb cccc", area=(0, 0, 100, 20), fill="FFFFFF"), fonts)
+    finding = fit_findings(placed)[0]
+    assert finding["code"] == "text_overflow"
+    observed = finding["observations"]
+    assert observed["lines"] == 2 and observed["hard_lines"] == 1
+    assert observed["single_line_width_pt"] == 140
+    # 2 行の文字ブロックは 18 + 24 + 6 = 48 pt で、枠の 20 pt より 28 pt 高い。
+    assert observed["height_shortfall_pt"] == pytest.approx(28)
+    assert placed.text.natural_width == pytest.approx(140)
+
+
 def test_unbreakable_part_wider_than_inner_is_overflow_without_ink():
     """内側より長い語は、計測も PowerPoint と同じく語の途中で分けるのでインクは収まるが、表示の不具合なので
     text_overflow（エラー）として報告し、分ける位置のない部分の幅と、語の途中で分けた行を示す。"""
@@ -1423,7 +1645,8 @@ def test_unbreakable_part_wider_than_inner_is_overflow_without_ink():
     assert placed.ink.right <= 60 and placed.ink.bottom <= 100  # インクは文字領域に収まる
     findings = fit_findings(placed)
     # 内側の幅いっぱいまで詰めた行は、誤差の範囲（参考）にもなる。
-    assert [item["code"] for item in findings] == ["text_overflow", "text_wrap_near_limit"]
+    # 最後の行は 1 文字なので、短い行の参考も出る。
+    assert [item["code"] for item in findings] == ["text_overflow", "text_wrap_near_limit", "text_short_line"]
     finding = findings[0]
     assert finding["severity"] == "error"
     assert "PowerPoint は語の途中で改行する" in finding["message"]
@@ -1463,6 +1686,7 @@ def test_layout_record_has_absolute_positions():
             "ink_bottom_pt": 2,
             "hard_break": True,
             "near_limit": False,
+            "wrap": None,
         },
         {
             "text": "de",
@@ -1473,9 +1697,10 @@ def test_layout_record_has_absolute_positions():
             "ink_bottom_pt": 2,
             "hard_break": False,
             "near_limit": False,
+            "wrap": None,
         },
     ]
-    assert MEASURE_VERSION == "7"
+    assert MEASURE_VERSION == "9"
 
 
 def test_results_are_kept_per_font_source():

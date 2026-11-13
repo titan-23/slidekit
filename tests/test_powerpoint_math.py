@@ -1,6 +1,6 @@
 """SLIDEKIT_TEST_POWERPOINT=1 を指定したときだけ、数式の計測を実際の PowerPoint の変換と比べる。
 
-照合データ（tests/data/powerpoint_math.json）の式から 15 個を選び、照合データの道具（tests/tools/powerpoint_math_data.py）と
+照合データ（tests/data/powerpoint_math.json）の式から代表例を選び、照合データの道具（tests/tools/powerpoint_math_data.py）と
 同じ資料と計測の方法で、PowerPoint の PDF を作り直す。計測との差が照合の基準（metrics.REFERENCE_LIMITS）に入ることを確かめる。
 PowerPoint の版を変えたときと、数式の書き出しを変えたときの確認に使う。資料はフィクスチャ windows_fonts_environment で
 Windows の既定フォントを使う。直列に実行する（`-p no:xdist`）。
@@ -42,6 +42,15 @@ SELECTED = (
     r"\sqrt{x},y",
     r"\log x,y",
     "x a/b",
+    r"\left(\frac{\frac{a}{b}}{c}\right)",
+    r"\left(\frac{a}{\frac{b}{c}}\right)",
+    r"\frac{\frac{a}{b}}{c}",
+    r"\left(\sqrt{\frac{a}{b}}\right)",
+    r"\left(\sum_{i=1}^{n} a_i\right)",
+    r"m^{1/4}",
+    r"2^{\lceil a/2\rceil}",
+    r"\left(\frac{\frac{1}{2}}{3}\right)",
+    r"\left(\frac{1}{\frac{2}{3}}\right)",
 )
 
 
@@ -63,7 +72,7 @@ def test_real_powerpoint_math_metrics(tmp_path, windows_fonts_environment):
 
     tool = _tool()
     reference = {item["expression"] for item in json.loads(DATA.read_text(encoding="utf-8"))["items"]}
-    assert set(SELECTED) <= reference and len(SELECTED) == 15
+    assert set(SELECTED) <= reference
     pages = tool.layout_items(list(SELECTED))
     tool.write_deck(tmp_path, pages)
     pdf, _doctor, project = tool.render(tmp_path)

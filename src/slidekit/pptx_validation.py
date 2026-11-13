@@ -392,6 +392,7 @@ def _check_runs(report, node, element, fonts) -> None:
         values = [
             ("bold", bool(own.get("bold")), _flag(properties.get("b"))),
             ("underline", bool(own.get("underline")), properties.get("u", "none") != "none"),
+            ("superscript", bool(own.get("superscript")), int(properties.get("baseline", "0") or 0) > 0),
         ]
         if own.get("color"):
             values.append(

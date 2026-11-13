@@ -336,9 +336,15 @@ def run_command(command, **replacements):
     replacements は書き換える引数（reviewer・note・reason など）。コマンドの解釈そのものは CLI の試験が確かめる。
     """
     tokens = shlex.split(command)
+    pending = "--pending" in tokens
+    tokens = [token for token in tokens if token != "--pending"]
     assert tokens[:2] == ["slidekit", "review"] and len(tokens[3:]) % 2 == 0, command
     options = dict(zip(tokens[3::2], tokens[4::2]))
     options.update({f"--{key.replace('_', '-')}": value for key, value in replacements.items()})
+    if tokens[2] == "record" and pending:
+        return records.record_pending(
+            options["--build"], options["--reviewer"], options["--note"], status_id=options["--status-id"]
+        )
     if tokens[2] == "record":
         return records.record_review(
             options["--build"],
@@ -396,7 +402,7 @@ def test_changed_inputs_or_artifacts_block_record_check_and_export(tmp_path, fil
         recorded = records.record_review(run, "content", "all", "確認者", "内容確認")
         assert [record["kind"] for record in recorded["records"]] == ["content"]
         assert recorded["notices"] == [
-            {"code": "input_changed", "message": INPUT_NOTICE, "paths": [str(path)], "count": 1}
+            {"code": "input_changed", "message": INPUT_NOTICE, "paths": [str(path)], "kinds": ["Python"], "count": 1}
         ]
     assert records.export_build(run)["status"] == "failed"
     assert not (root / "presentation.pptx").exists()
@@ -861,7 +867,9 @@ def test_carry_rejects_corrupted_source_and_reports_changed_target_inputs(tmp_pa
     source.write_text("変更", encoding="utf-8")
     result = records.carry_reviews(old, new)
     assert {record["kind"] for record in result["records"]} == {"visual", "content"}
-    assert result["notices"] == [{"code": "input_changed", "message": INPUT_NOTICE, "paths": [str(source)], "count": 1}]
+    assert result["notices"] == [
+        {"code": "input_changed", "message": INPUT_NOTICE, "paths": [str(source)], "kinds": ["Python"], "count": 1}
+    ]
 
 
 @pytest.mark.parametrize("change", ["edited", "removed"])
@@ -1334,6 +1342,41 @@ def test_record_and_export_hash_each_file_once(tmp_path, monkeypatch):
 # 残りの確認の一覧とまとめての記録
 
 
+def test_record_pending_records_every_pending_review_at_once(tmp_path, monkeypatch):
+    """review record --pending は、review status が示した未確認の確認をすべて 1 回で記録し、残りの件数を返す。"""
+    run = fixture_run(tmp_path, pages=("p1", "p2", "p3"), fallback=("p2",))
+    monkeypatch.chdir(run.parent.parent.parent)
+    records.record_review(run, "visual", "1", "確認者", "表示を確認")
+    status = records.review_status(run)
+    status_id = status["status_id"]
+    # 種類ごとの確認内容がなく、--note もなければ記録しない。
+    with pytest.raises(records.RecordError, match="確認内容がない種類がある: content、overview、visual"):
+        records.record_pending(run, "確認者", None, status_id=status_id)
+    # 照合用の値が違えば記録しない（review status の後に未確認の対象が変わった）。
+    with pytest.raises(records.RecordError, match="review status の後に変わった"):
+        records.record_pending(run, "確認者", "見た", status_id="s_0000000000000000")
+    result = records.record_pending(
+        run, "確認者", "表示と一覧画像を確認", status_id=status_id, notes={"content": "依頼と本文を照合"}
+    )
+    kinds = {(record["kind"], record.get("variant")) for record in result["records"]}
+    assert kinds == {("visual", "standard"), ("visual", "fallback"), ("overview", "standard"), ("content", None)}
+    assert len({record["batch"] for record in result["records"]}) == 1
+    notes = {record["kind"]: record["note"] for record in result["records"]}
+    assert notes == {
+        "visual": "表示と一覧画像を確認",
+        "overview": "表示と一覧画像を確認",
+        "content": "依頼と本文を照合",
+    }
+    assert result["remaining"] == {"visual": 0, "overview": 0, "content": 0, "warnings": 0}
+    assert records.review_status(run)["status"] == "complete"
+    with pytest.raises(records.RecordError, match="未確認の確認がない"):
+        records.record_pending(run, "確認者", "見た", status_id=status_id)
+    # 通常の記録も、残りの件数を返す。
+    other = fixture_run(tmp_path, "0002", pages=("p1", "p2"))
+    recorded = records.record_review(other, "visual", "all", "確認者", "表示を確認")
+    assert recorded["remaining"] == {"visual": 0, "overview": 1, "content": 2, "warnings": 0}
+
+
 def test_review_status_groups_pending_and_suggests_commands(tmp_path, monkeypatch):
     pages = tuple(f"p{number}" for number in range(1, 8))
     run = fixture_run(tmp_path, pages=pages, fallback=("p5",))
@@ -1398,6 +1441,14 @@ def test_review_status_groups_pending_and_suggests_commands(tmp_path, monkeypatc
         }
     ]
     placeholders = f'--reviewer "{records.REVIEWER_PLACEHOLDER}" --note "{records.NOTE_PLACEHOLDER}"'
+    # 先頭は、未確認の確認をまとめて記録するコマンド（照合用の値は未確認の全体から作る）。
+    assert re.fullmatch(r"s_[0-9a-f]{16}", status["status_id"])
+    assert status["next"][0] == (
+        f"slidekit review record --build out/runs/0001 --pending --status-id {status['status_id']} {placeholders}"
+    )
+    with pytest.raises(records.RecordError, match="置き場所のままである"):
+        run_command(status["next"][0])
+    status["next"] = status["next"][1:]
     assert status["next"] == [
         f"slidekit review record --build out/runs/0001 --kind visual --slides 3,5-7 {placeholders}",
         f"slidekit review record --build out/runs/0001 --kind visual --variant fallback --slides 5 {placeholders}",
@@ -1684,6 +1735,12 @@ def test_auto_carry_finds_newest_valid_original_across_runs(tmp_path):
     result = records.carry_reviews_auto(second)
     assert [(record["kind"], record["source"]["run"]) for record in result["records"]] == [("accept", str(first))]
     assert result["remaining"] == {"visual": 1, "overview": 1, "content": 1, "warnings": 0}
+    # 引き継げなかった理由は、同じ確認対象の前の記録の実行と比べて示す（この生成記録には内容の内訳がない）。
+    assert sorted((item["kind"], item["reason"], item["compared_run"]) for item in result["pending_reasons"]) == [
+        ("content", "内容の変更", "0001"),
+        ("visual", "ページの表示の変更", "0001"),
+    ]
+    assert result["compared_run"] == "0001" and result["environment_changes"] == []
     records.record_review(second, "visual,content", "all", "確認者", "変えたページを確認")
     # 0003 で元に戻すと、0002 の記録でなく 0001 の元の記録を引き継ぐ。記録を見つけた実行は via に残る。
     third = fixture_run(tmp_path, "0003", warning=True)
@@ -1708,6 +1765,7 @@ def test_auto_carry_finds_newest_valid_original_across_runs(tmp_path):
         "records": [record["id"] for record in result["records"]],
         "skipped": {},
         "skipped_runs": {},
+        "pending_reasons": [],
     }
     # 新しい実行に同じ証拠の人の記録があれば、そちらを元にする。取り消すと、その前の有効な元の記録を使う。
     newer = records.record_review(third, "content", "all", "別の確認者", "内容を読み直した")["records"][0]
@@ -2413,3 +2471,63 @@ def test_legacy_readers_accept_only_version_one(tmp_path):
     for name in ("future", "boolean", "missing"):
         with pytest.raises(records.RecordError, match="対応していない記録形式"):
             records.read_record(tmp_path / f"{name}.json", allow_legacy=True)
+
+
+def test_pending_reasons_split_page_and_document_changes(tmp_path):
+    """引き継げなかった内容の確認は、内容の内訳で本文の変更か元資料の変更かを分け、表示は環境の証拠で分ける。"""
+
+    class Origin:
+        def __init__(self, manifest):
+            self.path = tmp_path / "0007"
+            self.manifest = manifest
+
+    def manifest(page, documents, environment="e1"):
+        return {
+            "slides": [
+                {
+                    "id": "a",
+                    "content_parts": {"page": page, "documents": documents, "bibliography": {}},
+                    "visuals": {"powerpoint:standard": {"environment_hash": environment}},
+                }
+            ]
+        }
+
+    old = manifest("p1", {"proof": "h1", "notes": "n1"})
+    originals = [
+        (Origin(old), {"kind": "content", "slide_id": "a", "evidence_hash": "x"}, None),
+        (Origin(old), {"kind": "visual", "slide_id": "a", "renderer": "powerpoint", "variant": "standard"}, None),
+    ]
+    content = {"kind": "content", "slide_id": "a", "evidence_hash": "y"}
+    visual = {"kind": "visual", "slide_id": "a", "renderer": "powerpoint", "variant": "standard", "evidence_hash": "y"}
+    reason = records._pending_reason(content, originals, manifest("p1", {"proof": "h2", "notes": "n1"}))
+    assert (reason["reason"], reason["documents"], reason["compared_run"]) == ("元資料の変更", ["proof"], "0007")
+    assert records._pending_reason(content, originals, manifest("p2", {"proof": "h1"}))["reason"] == "本文の変更"
+    assert records._pending_reason(visual, originals, manifest("p1", {}, "e2"))["reason"] == "表示環境の変更"
+    assert records._pending_reason(visual, originals, manifest("p1", {}, "e1"))["reason"] == "ページの表示の変更"
+    other = {**content, "slide_id": "b"}
+    assert records._pending_reason(other, originals, old)["reason"] == "前の確認の記録がない"
+
+
+def test_environment_changes_list_versions_and_fonts():
+    def manifest(renderer, package, font, measure="9"):
+        return {
+            "environment": {
+                "renderers": {"powerpoint": {"version": renderer}},
+                "packages": {"pypdfium2": package},
+                "python": "3.14.4",
+                "fonts": {
+                    "measure_version": measure,
+                    "math_engine": "opentype-4",
+                    "fonts": {"Arial": {"sha256": font, "version": f"Version {font}"}},
+                },
+            }
+        }
+
+    before, after = manifest("16.0.1", "5.13.0", "a", "8"), manifest("16.0.2", "5.14.0", "b")
+    assert records._environment_changes(before, after) == [
+        {"item": "表示ソフト powerpoint", "before": "16.0.1", "after": "16.0.2"},
+        {"item": "pypdfium2", "before": "5.13.0", "after": "5.14.0"},
+        {"item": "計測の版", "before": "8", "after": "9"},
+        {"item": "フォント Arial", "before": "Version a", "after": "Version b"},
+    ]
+    assert records._environment_changes(before, before) == []

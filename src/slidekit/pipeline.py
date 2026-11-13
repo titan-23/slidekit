@@ -23,9 +23,11 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import socket
 import sys
 import tempfile
+import threading
 import traceback
 import unicodedata
 import uuid
@@ -39,12 +41,14 @@ from .evidence import (
     EVIDENCE_VERSION,
     RENDER_SCALE,
     content_digest,
+    content_parts,
     deck_digest,
     display_environment,
     overview_digest,
     pixel_digest,
     pptx_pages,
     render_page_image,
+    visual_body_digest,
     visual_digest,
 )
 from .fallback import compare_package_structure, fallback_required, finalize_math, prepare_fallback, prepare_final_form
@@ -57,7 +61,7 @@ from .pptx_validation import validate_pptx
 from .progress import Progress
 from .renderers import RendererError, open_session
 from .report import count_issues, sort_issues
-from .validators import apply_declarations, make_diagnostic, merge_diagnostics, validate_scene
+from .validators import apply_declarations, make_diagnostic, merge_diagnostics, skip_role_checks, validate_scene
 from .writer import write_pptx
 
 # 成果物の一覧に入れないファイル：生成中の印と、生成の後に書き換わる記録（確認記録と検査の結果）。
@@ -386,7 +390,7 @@ def _finish_issues(issues: list[dict], scene: dict | None) -> list[dict]:
     """
     issues = merge_diagnostics(issues)
     if scene is not None:
-        issues = apply_declarations(issues, scene)
+        issues = apply_declarations(skip_role_checks(issues, scene), scene)
     issues = sort_issues(issues, scene["slides"] if scene is not None else None)
     if _unnumbered(scene):
         issues = [{key: value for key, value in issue.items() if key != "slide_number"} for issue in issues]
@@ -466,6 +470,56 @@ def layout(path, *, slides=None, progress=None) -> dict:
         "timings": progress.timings,
         "elapsed_seconds": progress.elapsed,
         "exit_code": exit_code,
+    }
+
+
+def measure(path, texts, *, width=None, kind="text", role=None, size=None, page_kind="content", markup=False) -> dict:
+    """文字列を資料の書式で計測する（`slide.measure()` と同じ計算）。要素を作らず、ファイルを書かない。
+
+    width は枠の幅（pt）か "content"（page_kind のページの本文領域の幅）で、None なら折り返さない。
+    size は役割の文字サイズを替える。markup が真なら `markup.parse` で $…$ を数式として読む。
+    結果の各項目は、行（文字列・幅・折り返しの種類）、枠の寸法、1 行に収めるのに要る枠の幅を持つ。
+    """
+    from .markup import parse
+
+    project = load_project(path)
+    try:
+        slide = Deck(project).slide(id="measure", kind=page_kind)
+        frame = slide.content.w if width == "content" else width
+        arguments = {} if size is None else {"size_pt": size}
+        results = []
+        for text in texts:
+            content = parse(text) if markup and kind != "equation" else text
+            layout = slide.measure(content, kind=kind, width=frame, role=role, **arguments)
+            insets = layout.insets
+            results.append(
+                {
+                    "text": text,
+                    "lines": [
+                        {"text": line.text, "width_pt": round(line.width, 2), "wrap": line.wrap}
+                        for line in layout.lines
+                    ],
+                    "frame_width_pt": round(layout.width, 2),
+                    "frame_height_pt": round(layout.height, 2),
+                    "available_width_pt": (
+                        None if layout.available_width is None else round(layout.available_width, 2)
+                    ),
+                    "natural_width_pt": round(layout.natural_width, 2),
+                    "single_line_frame_width_pt": round(layout.natural_width + insets.left + insets.right, 2),
+                }
+            )
+    finally:
+        _close_fonts(project)
+    return {
+        "command": "measure",
+        "status": "passed",
+        "project": str(project.path),
+        "kind": kind,
+        "role": role,
+        "size_pt": size,
+        "width_pt": None if frame is None else round(frame, 2),
+        "results": results,
+        "exit_code": 0,
     }
 
 
@@ -770,6 +824,7 @@ class _Build:
                     "id": page["id"],
                     "number": None if unnumbered else page.get("number", number),
                     "content_hash": content_digest(page, project),
+                    "content_parts": content_parts(page, project),
                     "page_parts": None,
                     "visuals": {},
                 }
@@ -968,7 +1023,11 @@ class _Build:
         return issues, parts
 
     def clipped_crops(self, crops: list[dict]) -> list[dict]:
-        """互換画像の切り出しが範囲で切り詰められた数式の警告。"""
+        """互換画像の切り出しが範囲で切り詰められた数式の警告。
+
+        超えた部分に範囲が掛かるほかの要素（`nearby_elements`）があれば、観測値に加え、文言でその要素を示す。
+        ない警告の観測値は変えない（許容の記録の証拠を保つ）。
+        """
         pages = {page["id"]: page for page in self.scene["slides"]}
         issues = []
         for crop in crops:
@@ -981,10 +1040,18 @@ class _Build:
             observed = {
                 key: crop.get(key) for key in ("rectangle_pt", "frame_pt", "crop_pt", "margin_pt", "outline_pt")
             }
+            nearby = list(crop.get("nearby_elements") or [])
+            message = "数式の描画が互換画像の範囲を超えている。文字枠を広げる"
+            if nearby:
+                observed["nearby_elements"] = nearby
+                message = (
+                    f"数式の描画が互換画像の範囲を超えている。超えた部分に要素 {', '.join(nearby)} の範囲が掛かる。"
+                    "超えた描画がその要素のものなら数式は欠けない。互換表示を確かめる"
+                )
             issues.append(
                 make_diagnostic(
                     "fallback_crop_clipped",
-                    "数式の描画が互換画像の範囲を超えている。文字枠を広げる",
+                    message,
                     scope="pptx",
                     slide_id=crop.get("slide_id"),
                     element_id=crop.get("element_id"),
@@ -1025,6 +1092,12 @@ class _Build:
             )
             for slide_id, number in positions.items()
         }
+        bodies = {
+            slide_id: visual_body_digest(
+                parts[slide_id], renderer, variant, environment_hash, render_date=render_date, number=number
+            )
+            for slide_id, number in positions.items()
+        }
         record: dict = {}
         issues = validate_pdf(
             pdf,
@@ -1048,6 +1121,7 @@ class _Build:
             "issues": issues,
             "environment_hash": environment_hash,
             "evidence": evidence,
+            "bodies": bodies,
             "pictures": dict(zip(order, pictures)),
             "contacts": contacts,
         }
@@ -1080,6 +1154,10 @@ class _Build:
                     "environment_hash": value["environment_hash"],
                     "evidence_hash": evidence_hash,
                 }
+                body = value.get("bodies", {}).get(page["id"])
+                if body is not None:
+                    # ページ番号の図形を除いた証拠（番号の枠・書式・文字だけが変わったページの引き継ぎに使う）。
+                    page["visuals"][key]["body_hash"] = body
                 self.requirements.append(
                     {
                         "kind": "visual",
@@ -1303,10 +1381,48 @@ def _carry(project, state, carry_from, failure=None) -> dict | None:
         "skipped": skipped,
         "skipped_runs": result.get("skipped_runs") or {},
         "remaining": remaining,
+        "renumbered_from": result.get("renumbered_from") or {},
+        "pending_reasons": result.get("pending_reasons") or [],
+        "compared_run": result.get("compared_run"),
+        "environment_changes": result.get("environment_changes") or [],
         "notices": result.get("notices") or [],
     }
 
 
+# 生成の間、Ctrl+C（SIGINT）と同じ後片付けを通す終了の信号。Windows には SIGHUP がない。
+_INTERRUPT_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name))
+
+
+@contextlib.contextmanager
+def _signals_as_interrupt():
+    """SIGTERM と SIGHUP を KeyboardInterrupt にし、抜けるときに元の処理へ戻す。
+
+    既定の処理（その場で終了）のままの信号だけを差し替える（呼び出し元が設定した処理は変えない）。信号の処理は主スレッドでしか
+    設定できないので、ほかのスレッドでは何もしない。2 回目以降の信号は、変換の作業プロセスの切り離しと記録の書き込みを
+    最後まで行うために無視する。
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    received = []
+
+    def interrupt(number, frame):
+        if not received:
+            received.append(number)
+            raise KeyboardInterrupt
+
+    previous = {}
+    for number in _INTERRUPT_SIGNALS:
+        if signal.getsignal(number) is signal.SIG_DFL:
+            previous[number] = signal.signal(number, interrupt)
+    try:
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+
+
+@_signals_as_interrupt()
 def build(
     path,
     *,
@@ -1336,7 +1452,9 @@ def build(
 
     戻り値の status は生成記録と同じ（built・stopped・failed）で、品質の結果は counts と exit_code で示す。
     利用者の中断（KeyboardInterrupt）でも記録を書き、診断 build_interrupted を加え、その時点の戻り値を例外の属性 result に
-    付けてから送り直す（コマンドが実行ディレクトリを示すことができるように）。
+    付けてから送り直す（コマンドが実行ディレクトリを示すことができるように）。生成の間は、主スレッドで呼んだとき、
+    既定の処理のままの SIGTERM と SIGHUP も中断として扱う（`_signals_as_interrupt`）。変換中なら、作業プロセスを切り離して
+    残存記録を残し、作業プロセスが変換の後に複製を閉じて記録を消し、自分で起動した PowerPoint を終了する。
     """
     progress = Progress(None) if progress is None else progress
     if slides is not None:
@@ -1384,6 +1502,12 @@ def build(
         carried = _carry(project, state, source, carry_failure)
         if carried is not None:
             result["carry"] = carried
+        if result.get("status") == "built":
+            # 前の実行とのページ画像の比較（変わっていないページ・番号だけ変わったページ・変わったページ）。
+            try:
+                result["comparison"] = records.compare_previous(state.run)
+            except (records.RecordError, OSError, ValueError) as error:
+                result["comparison"] = {"error": str(error)}
     except KeyboardInterrupt as interrupt:
         interrupt.result = state.result()
         raise

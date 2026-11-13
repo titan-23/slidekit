@@ -61,7 +61,7 @@ def test_style_key_tables_follow_element_kinds():
     assert DEFAULT_KINDS == {"text", "equation", "box", "table_cell", "table_header", "line", "arrow"}
     assert DEFAULT_CHAINS["table_header"] == ("box", "table_cell", "table_header")
     assert DEFAULT_CHAINS["arrow"] == ("line", "arrow")
-    assert {"restricted", "inherits", "allowed_slide_ids", "allowed_content"} == ROLE_ONLY_KEYS
+    assert {"restricted", "inherits", "allowed_slide_ids", "allowed_content", "skip_checks"} == ROLE_ONLY_KEYS
     assert ROLE_KEYS == ALL_STYLE_KEYS | ROLE_ONLY_KEYS
     assert styles.PAINT_KEYS <= styles.FRAME_KEYS and styles.PAINT_KEYS <= styles.COLOR_KEYS
     assert ATTRIBUTE_KEYS == {"description", "semantic", "rotation", "flip_h", "flip_v", "allow_roles"}
@@ -298,6 +298,7 @@ def test_fragment_style_resolves_fragment_over_element():
         "bold": False,
         "color": "20252B",
         "underline": False,
+        "superscript": False,
         "link": None,
     }
     assert fragment_style(element, {"kind": "emphasis", "text": "a"})["bold"] is True
@@ -305,7 +306,7 @@ def test_fragment_style_resolves_fragment_over_element():
     given = {
         "kind": "text",
         "text": "詳細",
-        "style": {"size_pt": 14, "color": "183153", "underline": True, "bold": True},
+        "style": {"size_pt": 14, "color": "183153", "underline": True, "bold": True, "superscript": True},
         "link": "https://example.com/",
     }
     assert fragment_style(element, given) == {
@@ -313,6 +314,7 @@ def test_fragment_style_resolves_fragment_over_element():
         "bold": True,
         "color": "183153",
         "underline": True,
+        "superscript": True,
         "link": "https://example.com/",
     }
     assert (

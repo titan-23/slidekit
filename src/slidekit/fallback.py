@@ -49,6 +49,16 @@ _P14 = "http://schemas.microsoft.com/office/powerpoint/2010/main"
 _EPSILON = 1e-6
 # 数式の線の塗りの色を自身の文字の色と同じとみなす差（各成分 0〜1）。
 _COLOR_TOLERANCE = 0.02
+# ほかの要素の描画とみなすときに、その要素の範囲を広げる幅（pt）。枠線は線幅の半分を加える。
+_REGION_MARGIN_PT = 1.0
+# 線・矢印の範囲は、さらに線幅のこの倍数だけ広げる。矢印の先端の幅は線幅の 5 倍までで、線の両側へ半分ずつ出る。
+_LINE_END_FACTOR = 3.0
+# 線幅が分からない線・矢印（雛形の書式の線）に使う線幅（pt）。
+_DEFAULT_LINE_PT = 1.0
+# 始点と終点を結ぶ線として扱う図形の形（`a:prstGeom` の `prst`）。
+_LINE_GEOMETRIES = frozenset({"line", "straightConnector1"})
+# 範囲を求める図形の要素。
+_SHAPE_TAGS = frozenset(tag("p", name) for name in ("sp", "cxnSp", "pic", "graphicFrame"))
 # 関係の識別子を指す属性（`r:` の名前空間）の値。ページ全体と、`mc:Fallback` の中だけ。
 _RELATIONSHIP_VALUES = etree.XPath("//@*[namespace-uri()=$namespace]")
 _FALLBACK_RELATIONSHIP_VALUES = etree.XPath(
@@ -149,6 +159,67 @@ def _same_color(a, b) -> bool:
     )
 
 
+def _segment_distance(x: float, y: float, segment) -> float:
+    """点 (x, y) から線分（x0, y0, x1, y1）までの距離。"""
+    x0, y0, x1, y1 = segment
+    dx, dy = x1 - x0, y1 - y0
+    length = dx * dx + dy * dy
+    t = 0.0 if length <= 0 else min(1.0, max(0.0, ((x - x0) * dx + (y - y0) * dy) / length))
+    return math.hypot(x - x0 - t * dx, y - y0 - t * dy)
+
+
+class _Region:
+    """ほかの要素の範囲。`neighbors` の 1 項目（`{"id", "box_pt", "tolerance_pt", "segment_pt"}`）から作る。"""
+
+    def __init__(self, item):
+        from .pdf import Box
+
+        self.id = item["id"]
+        self.box = Box.of(item["box_pt"])
+        self.tolerance = float(item["tolerance_pt"])
+        self.segment = tuple(item["segment_pt"]) if item.get("segment_pt") else None
+        self.reach = self.box.expanded(self.tolerance)
+
+    def drew(self, box, probe) -> bool:
+        """外接矩形 box の描画を、この要素の描画とみなせるか。
+
+        次のどちらかなら真とする。
+        - box と要素の範囲が、互いに相手を `tolerance` 広げた範囲に収まる（1 つの塗りで描いた線・矢印の全体や、箱の塗り）。
+        - 線の形の要素で、box が数式の矩形を広げた範囲 probe に収まらず、box の 4 隅が線分から `tolerance` 以内にある
+          （別に描いた矢印の先端や破線の一部）。probe に収まる描画は数式の括弧などと区別できないので、この規則を使わない。
+        """
+        if not _contains(self.reach, box):
+            return False
+        if _contains(box.expanded(self.tolerance), self.box):
+            return True
+        return (
+            self.segment is not None
+            and not _contains(probe, box)
+            and all(
+                _segment_distance(x, y, self.segment) <= self.tolerance
+                for x in (box.x0, box.x1)
+                for y in (box.y0, box.y1)
+            )
+        )
+
+    def contains(self, rectangle) -> bool:
+        """線の形でない要素が rectangle を含むか（数式を載せた箱など）。"""
+        return self.segment is None and _contains(self.reach, rectangle)
+
+
+def _outside(box, bound) -> list:
+    """box のうち bound の外の部分。左・右・上・下の帯（重なってもよい）の列。"""
+    from .pdf import Box
+
+    parts = [
+        Box(box.x0, box.y0, min(box.x1, bound.x0), box.y1),
+        Box(max(box.x0, bound.x1), box.y0, box.x1, box.y1),
+        Box(box.x0, box.y0, box.x1, min(box.y1, bound.y0)),
+        Box(box.x0, max(box.y0, bound.y1), box.x1, box.y1),
+    ]
+    return [part for part in parts if not part.is_empty]
+
+
 def crop_rectangle(
     page,
     rectangle,
@@ -161,11 +232,14 @@ def crop_rectangle(
     tolerance_pt: float = TOLERANCE_PT,
     math_fonts: Iterable[str] = (),
     others: Iterable = (),
+    neighbors: Iterable[dict] = (),
 ) -> tuple[Any, dict]:
     """数式の図形自身の描画と枠線を含む切り出し範囲を、変換した PDF のページから求める。
 
     `traces` は `page.spans()`、`drawings` は `page.drawings()` の結果（`slidekit.pdf` のページ。ページごとに 1 回求めて使い回す）。
     PowerPoint は図形ごとに続けて描き、数式の線（伸びる括弧・根号・分数線）はその構造の最初の字形より前に描く。
+    `neighbors` は同じページのほかの要素の範囲（`{"id", "box_pt", "tolerance_pt", "segment_pt"}` の列。`_shape_regions` の形）で、
+    その要素の描画とみなせる塗り（`_Region.drew`。1 つの塗りで描いた矢印の全体など）は 3・4 で含めない。
     1. 自身の文字：基点が矩形の中にある文字と、基点が矩形を `tolerance_pt` 広げた範囲にあり送り幅の横の中央もその範囲に
        ある文字。外接矩形を含める（枠の辺に接して始まる隣の要素の最初の文字は、中央が外にあるので含めない）。
     2. `math_fonts`（数式の書体名。`pdf_layout._font_name` の形）を渡すと、自身の文字の後に続く数式の書体の文字列も、
@@ -174,13 +248,17 @@ def crop_rectangle(
     3. 自身の文字を含む文字列の描画順の最小 low と最大 high の間に描いた塗り（`type` が `"f"`）のうち、上限に掛かり
        数式の図形の枠でないものを含める。high の後、次の他の文字列より前に描いた塗りは、中心が範囲内で面積が矩形以下のもの
        だけを含める。
-    4. low の直前から描画順にさかのぼり、数式の線の条件に合う塗り（自身の文字の色で、上限に掛かり、数式の図形の枠でないもの）が
-       続く間は、矩形に掛かるものを含める（括弧・根号）。他の文字列か、数式の線の条件に合わない描画で止める（図形の塗りと枠線は
-       線より前に描かれる）。矩形に掛からない塗りは、直前に描いた別の図形（文字のない飾りの線など）と区別できないので含めない。
+    4. low の直前から描画順にさかのぼり、数式の線の条件に合う塗り（自身の文字の色で、上限に掛かり、数式の図形の枠でも
+       ほかの要素の描画でもないもの）が続く間は、矩形に掛かるものを含める（括弧・根号）。他の文字列か、数式の線の条件に合わない
+       描画で止める（図形の塗りと枠線は線より前に描かれ、ほかの要素の描画より前は別の図形である）。矩形に掛からない塗りは、
+       直前に描いた別の図形（文字のない飾りの線など）と区別できないので含めない。
     5. 枠線があれば、矩形を枠線の幅の半分と 1 / scale pt だけ広げる（外側の半分と縁のぼかし）。
     6. 1〜5 を上限とページで切り詰め、1 / scale pt の格子へ外向きにそろえる。上限を超えた描画があれば `clipped` を真にする。
+       そのときは、上限の外の部分に範囲が掛かるほかの要素（数式を載せた箱など、数式の矩形を含む要素を除く）の識別子を
+       `nearby_elements` に入れる。上限を超えた描画が、その要素のものかもしれない。
     不透明度が 0 の文字と描画（説明のある要素に PowerPoint が加える読み上げ用の文字など）は読まない。
-    戻り値は範囲と `{"margin_pt": [左, 上, 右, 下], "clipped": 切り詰めたか, "outline_pt": 枠線の幅}`。
+    戻り値は範囲と `{"margin_pt": [左, 上, 右, 下], "clipped": 切り詰めたか, "outline_pt": 枠線の幅,
+    "nearby_elements": [識別子]}`。
     """
     from .pdf import Box
     from .pdf_layout import _font_name
@@ -189,6 +267,7 @@ def crop_rectangle(
     probe = _expanded(rectangle, tolerance_pt)
     limit = _expanded(rectangle, max_margin_pt) & page.rect
     blocked = [_expanded(Box.of(other), tolerance_pt) for other in others]
+    regions = [_Region(item) for item in neighbors]
     math_fonts = set(math_fonts)
 
     def inside(area, x: float, y: float) -> bool:
@@ -201,18 +280,30 @@ def crop_rectangle(
     def frame_like(box) -> bool:
         return all(abs(a - b) <= 1.0 for a, b in zip(box, rectangle))
 
+    def foreign(box) -> bool:
+        return any(region.drew(box, probe) for region in regions)
+
     spans = [span for span in traces if span.kind != 3 and span.opacity > 0]
     fills = sorted(
         (drawing for drawing in drawings if drawing.kind == "f" and drawing.fill_opacity > 0),
         key=lambda drawing: drawing.seqno,
     )
     wanted = rectangle
+    # 含めた描画と文字の範囲。上限を超えたときに、上限の外の部分に掛かる要素を探す。
+    included = []
+
+    def include(box) -> None:
+        nonlocal wanted
+        box = Box.of(box)
+        wanted |= box
+        included.append(box)
+
     own = {span.seqno: span for span in spans if any(own_character(character) for character in span.chars)}
     if own:
         for span in own.values():
             for character in span.chars:
                 if own_character(character):
-                    wanted |= character.bbox
+                    include(character.bbox)
         low, high = min(own), max(own)
         stop = math.inf
         for span in sorted((span for span in spans if span.seqno > high), key=lambda span: span.seqno):
@@ -228,19 +319,23 @@ def crop_rectangle(
             own[span.seqno] = span
             high = span.seqno
             for character in span.chars:
-                wanted |= character.bbox
+                include(character.bbox)
         colors = [span.color for span in own.values()]
         area = rectangle.width * rectangle.height
         for drawing in fills:
             box = drawing.rect
             if low <= drawing.seqno <= high:
-                if box.intersects(limit) and not frame_like(box):
-                    wanted |= box
+                if box.intersects(limit) and not frame_like(box) and not foreign(box):
+                    include(box)
             elif high < drawing.seqno < stop:
-                if inside(probe, (box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2) and box.width * box.height <= area:
-                    wanted |= box
+                if (
+                    inside(probe, (box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2)
+                    and box.width * box.height <= area
+                    and not foreign(box)
+                ):
+                    include(box)
         # low の直前に続く数式の線。矩形に掛かるものを含め、矩形に掛からず上限に掛かるもの（分数線か、すぐ前に描いた
-        # 別の図形の飾りの線）は含めずにさかのぼる。
+        # 別の図形の飾りの線）は含めずにさかのぼる。ほかの要素の描画（矢印など）で止める。
         items = {span.seqno: None for span in spans if span.seqno < low}
         items.update({drawing.seqno: drawing for drawing in drawings if drawing.seqno < low})
         for number in sorted(items, reverse=True):
@@ -256,15 +351,29 @@ def crop_rectangle(
                 or frame_like(box)
                 or not box.intersects(limit)
                 or not any(_same_color(drawing.fill, color) for color in colors)
+                or foreign(box)
             ):
                 break
             if box.intersects(probe):
-                wanted |= box
+                include(box)
     if outline_pt > 0:
-        wanted |= _expanded(rectangle, outline_pt / 2 + 1 / scale)
+        include(_expanded(rectangle, outline_pt / 2 + 1 / scale))
     clipped = not _contains(limit, wanted)
+    nearby = []
+    if clipped:
+        beyond = [part for box in included for part in _outside(box, limit)]
+        nearby = [
+            region.id
+            for region in regions
+            if not region.contains(rectangle) and any(region.reach.intersects(part) for part in beyond)
+        ]
     crop = _snap_outward(wanted & limit, scale) & page.rect
-    return crop, {"margin_pt": _margins(rectangle, crop), "clipped": clipped, "outline_pt": outline_pt}
+    return crop, {
+        "margin_pt": _margins(rectangle, crop),
+        "clipped": clipped,
+        "outline_pt": outline_pt,
+        "nearby_elements": list(dict.fromkeys(nearby)),
+    }
 
 
 def _crop_png(image, page_rect, scale: float, frame, crop) -> bytes:
@@ -350,6 +459,7 @@ def _page_crops(page, shapes: list[dict], scale: float, max_margin_pt: float) ->
             max_margin_pt=max_margin_pt,
             math_fonts=shape.get("math_fonts", ()),
             others=others,
+            neighbors=shape.get("neighbors", ()),
         )
         frame = Box.of(shape["frame_pt"]) if shape.get("frame_pt") else crop
         # 互換画像の図形の外は描くことができないので、切り出す範囲を図形の範囲に収める。
@@ -371,9 +481,10 @@ def _page_crops(page, shapes: list[dict], scale: float, max_margin_pt: float) ->
 def render_page_crops(pdf: str, index: int, shapes: list[dict], scale: float, max_margin_pt: float) -> list[dict]:
     """PDF の 1 ページから、数式ごとの互換画像を切り出す。子プロセスでも動かすことができる。
 
-    `shapes` は `[{"key", "rectangle_pt", "outline_pt", "frame_pt", "math_fonts"}]`。`frame_pt`（互換画像の図形の範囲）を省くと、
-    切り出す範囲そのものを画像にする。`math_fonts` は数式の書体名で、省くと枠の外へはみ出した数式の文字を探さない。
-    戻り値は `[{"key", "crop_pt", "margin_pt", "clipped", "outline_pt", "png"}]`。
+    `shapes` は `[{"key", "rectangle_pt", "outline_pt", "frame_pt", "math_fonts", "neighbors"}]`。`frame_pt`（互換画像の図形の範囲）を
+    省くと、切り出す範囲そのものを画像にする。`math_fonts` は数式の書体名で、省くと枠の外へはみ出した数式の文字を探さない。
+    `neighbors` は同じページのほかの要素の範囲（`crop_rectangle` の引数）で、省くとほかの要素の描画を区別しない。
+    戻り値は `[{"key", "crop_pt", "margin_pt", "clipped", "outline_pt", "nearby_elements", "png"}]`。
     """
     from .pdf import open_pdf
 
@@ -435,6 +546,131 @@ def _part_target(source: str, target: str) -> str:
     if target.startswith("/"):
         return posixpath.normpath(target).lstrip("/")
     return posixpath.normpath(posixpath.join(posixpath.dirname(source), target))
+
+
+def _placement(transform) -> tuple | None:
+    """`a:xfrm`（`p:xfrm`）の（x, y, 幅, 高さ（pt）, 回転（ラジアン）, 左右反転, 上下反転）。位置か寸法がなければ None。"""
+    if transform is None:
+        return None
+    offset, extent = transform.find("a:off", NS), transform.find("a:ext", NS)
+    if offset is None or extent is None:
+        return None
+    return (
+        int(offset.get("x", "0")) / EMU_PER_PT,
+        int(offset.get("y", "0")) / EMU_PER_PT,
+        int(extent.get("cx", "0")) / EMU_PER_PT,
+        int(extent.get("cy", "0")) / EMU_PER_PT,
+        math.radians(int(transform.get("rot", "0")) / 60000),
+        transform.get("flipH") in {"1", "true"},
+        transform.get("flipV") in {"1", "true"},
+    )
+
+
+def _orient(point, placement) -> tuple[float, float]:
+    """図形の座標の点に、図形の中心を軸にした反転と回転（時計回り）を当てる。"""
+    x, y, width, height, angle, flip_h, flip_v = placement
+    center_x, center_y = x + width / 2, y + height / 2
+    px, py = point
+    if flip_h:
+        px = 2 * center_x - px
+    if flip_v:
+        py = 2 * center_y - py
+    if angle:
+        dx, dy = px - center_x, py - center_y
+        px = center_x + dx * math.cos(angle) - dy * math.sin(angle)
+        py = center_y + dx * math.sin(angle) + dy * math.cos(angle)
+    return px, py
+
+
+def _group_mapping(group, outer):
+    """グループの子の座標をページの座標にする関数。outer は外側のグループの関数。"""
+    transform = group.find("p:grpSpPr/a:xfrm", NS)
+    placement = _placement(transform)
+    if placement is None:
+        return outer
+    x, y, width, height = placement[:4]
+    child_offset, child_extent = transform.find("a:chOff", NS), transform.find("a:chExt", NS)
+    child_x, child_y = (
+        (int(child_offset.get("x", "0")) / EMU_PER_PT, int(child_offset.get("y", "0")) / EMU_PER_PT)
+        if child_offset is not None
+        else (x, y)
+    )
+    child_width, child_height = (
+        (int(child_extent.get("cx", "0")) / EMU_PER_PT, int(child_extent.get("cy", "0")) / EMU_PER_PT)
+        if child_extent is not None
+        else (width, height)
+    )
+    scale_x = width / child_width if child_width > 0 else 1.0
+    scale_y = height / child_height if child_height > 0 else 1.0
+
+    def mapping(point):
+        local = (x + (point[0] - child_x) * scale_x, y + (point[1] - child_y) * scale_y)
+        return outer(_orient(local, placement))
+
+    return mapping
+
+
+def _shape_region(node, mapping) -> dict | None:
+    """図形の範囲（`crop_rectangle` の `neighbors` の 1 項目）。名前か位置がなければ None。
+
+    `box_pt` は回転と反転を当てた外接矩形。線の形の図形は始点と終点（`segment_pt`）も持つ。
+    `tolerance_pt` は描画の広がりの余裕で、線・矢印は矢印の先端の幅、ほかは枠線の外側の半分を含める。
+    """
+    from .pdf import Box
+
+    name = node.find(".//p:cNvPr", NS)
+    transform = node.find("p:xfrm" if node.tag == tag("p", "graphicFrame") else "p:spPr/a:xfrm", NS)
+    placement = _placement(transform)
+    if name is None or name.get("name") is None or placement is None:
+        return None
+    x, y, width, height = placement[:4]
+    corners = [
+        mapping(_orient(point, placement))
+        for point in ((x, y), (x + width, y), (x + width, y + height), (x, y + height))
+    ]
+    xs, ys = [point[0] for point in corners], [point[1] for point in corners]
+    region = {"id": name.get("name"), "box_pt": _points(Box(min(xs), min(ys), max(xs), max(ys)))}
+    line = outline_width_pt(node)
+    geometry = node.find("p:spPr/a:prstGeom", NS)
+    if geometry is not None and geometry.get("prst") in _LINE_GEOMETRIES:
+        start, end = (mapping(_orient(point, placement)) for point in ((x, y), (x + width, y + height)))
+        region["segment_pt"] = [round(value, 4) for value in (*start, *end)]
+        region["tolerance_pt"] = round(_REGION_MARGIN_PT + _LINE_END_FACTOR * (line or _DEFAULT_LINE_PT), 4)
+    else:
+        region["tolerance_pt"] = round(_REGION_MARGIN_PT + line / 2, 4)
+    return region
+
+
+def _shape_regions(tree) -> list[tuple[Any, dict]]:
+    """スライドの図形ごとの範囲。（図形, 範囲）の重なり順の列で、範囲は `_shape_region` の形。
+
+    グループの中の図形はグループの座標変換を当て、`mc:AlternateContent` は `mc:Choice` の図形を読む。
+    位置のない図形（雛形の位置を使うプレースホルダー）とグループ自身は含めない。
+    """
+    regions = []
+
+    def visit(container, mapping) -> None:
+        for child in container:
+            if child.tag == tag("mc", "AlternateContent"):
+                choice = child.find("mc:Choice", NS)
+                if choice is not None:
+                    visit(choice, mapping)
+            elif child.tag == tag("p", "grpSp"):
+                visit(child, _group_mapping(child, mapping))
+            elif child.tag in _SHAPE_TAGS:
+                region = _shape_region(child, mapping)
+                if region is not None:
+                    regions.append((child, region))
+
+    visit(tree, lambda point: point)
+    return regions
+
+
+def _neighbors(shapes: list[tuple[Any, dict]], tree) -> None:
+    """同じスライドの数式の図形の項目（（図形, 項目）の列）に、ほかの図形の範囲（`neighbors`）を加える。"""
+    regions = _shape_regions(tree)
+    for shape, item in shapes:
+        item["neighbors"] = [region for node, region in regions if node is not shape]
 
 
 def _math_fonts(shape) -> list[str]:
@@ -540,6 +776,7 @@ def _wrap_math(
                     "math_fonts": _math_fonts(shape),
                 }
             )
+        _neighbors(list(zip(plain, shapes[-len(plain) :])), tree)
         parts[name] = xml_bytes(root)
         parts[relation_name] = xml_bytes(relationships)
     if shapes:
@@ -566,6 +803,7 @@ def _read_final_form(parts: dict[str, bytes], ordered: list[str]) -> list[dict]:
             for node in relationships
             if node.get("TargetMode") != "External"
         }
+        placed = []
         for alternative in wrapped:
             if alternative.getparent() is not tree:
                 raise ValueError("数式を含む図形はスライドの直下に置く")
@@ -596,6 +834,8 @@ def _read_final_form(parts: dict[str, bytes], ordered: list[str]) -> list[dict]:
                     "math_fonts": _math_fonts(original),
                 }
             )
+            placed.append((original, shapes[-1]))
+        _neighbors(placed, tree)
     return shapes
 
 
@@ -654,6 +894,8 @@ def finalize_math(
     `workers` は `map(function, arguments)` を持つもの（`parallel.Workers` など）で、ページごとの切り出しを任せる。
     `None` なら同じプロセスで順に切り出す。どちらでも結果は同じである。scale は `prepare_final_form` に渡した値と同じにする。
     source_pptx_sha256・source_pdf_sha256 は入力の PPTX と PDF のハッシュ値で、分かっていれば渡す（求め直さない）。
+    切り出しでは同じスライドのほかの図形の範囲（`_shape_regions`）を渡し、その図形の描画を含めない。戻り値の `crops` の
+    `nearby_elements` は、切り詰めたときに上限の外の部分に範囲が掛かるほかの図形の名前（要素の識別子）である。
     """
     from .pdf import open_pdf
 
@@ -676,6 +918,7 @@ def finalize_math(
                 "outline_pt": shape["outline_pt"],
                 "frame_pt": list(shape["frame"]),
                 "math_fonts": shape["math_fonts"],
+                "neighbors": shape["neighbors"],
             }
         )
     with open_pdf(final_form_pdf) as document:
@@ -713,6 +956,7 @@ def finalize_math(
                 "margin_pt": result["margin_pt"],
                 "outline_pt": result["outline_pt"],
                 "clipped": result["clipped"],
+                "nearby_elements": result["nearby_elements"],
                 "image": shape["image"],
                 "image_sha256": hashlib.sha256(result["png"]).hexdigest(),
                 "native_math": shape["native_math"],

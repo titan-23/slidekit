@@ -8,6 +8,7 @@ import contextlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import threading
 from types import SimpleNamespace
@@ -728,6 +729,9 @@ def test_status_parses_worker_result(tmp_path, maintenance):
         "pending_process_alive": False,
         "staged_input_locked": False,
         "powerpoint_running": True,
+        # 古い作業スクリプトの結果（PowerPoint の処理の一覧がない）は空の一覧にする。
+        "powerpoint_processes": [],
+        "powerpoint_records": [],
         "abandoned": True,
         "state_dir": "W:\\state",
         "exit_code": 1,
@@ -825,12 +829,231 @@ def test_clear_passes_force_flag(tmp_path, maintenance):
         "removed_old_work_dirs": 2,
         "pending": {"run_id": "previous"},
         "holder": None,
+        "stopped_powerpoint": [],
         "exit_code": 0,
     }
+    assert "-StopOwned" not in forced and "-StopOwned" not in plain
     maintenance.value = {"ok": True, "status": "nothing", "reason": "残存記録はありません。"}
     assert renderers.clear_pending("powerpoint", {})["exit_code"] == 0
     assert renderers.clear_pending("libreoffice", {})["status"] == "nothing"
     assert len(maintenance.commands) == 3
+
+
+# slidekit が起動した PowerPoint（PID 5001）と、利用者の PowerPoint（PID 5002）。開始時刻は作業スクリプトの形（UTC）。
+OWNED_PROCESS = {
+    "pid": 5001,
+    "window_title": "",
+    "has_window": False,
+    "started_at": "2026-11-13T01:02:03.4567890Z",
+    "owned": True,
+    "record": "pending",
+}
+USER_PROCESS = {
+    "pid": 5002,
+    "window_title": "deck.pptx - PowerPoint",
+    "has_window": True,
+    "started_at": "2026-11-13T00:00:00.0000000Z",
+    "owned": False,
+    "record": None,
+}
+OWNED_PENDING = {
+    "run_id": "previous",
+    "process_id": 77,
+    "status": "interrupted",
+    "started_at": "2026-11-13T01:02:00Z",
+    "powerpoint": {
+        "started": True,
+        "pid": 5001,
+        "started_at": "2026-11-13T01:02:03.4567890Z",
+        "start_time": 134390000000000000,
+    },
+}
+
+
+def owned_status(**changes):
+    """残存記録と、slidekit が起動した PowerPoint が残った状態の作業スクリプトの結果。"""
+    return {
+        "ok": True,
+        "busy": False,
+        "holder": None,
+        "pending": OWNED_PENDING,
+        "pending_exists": True,
+        "pending_process_alive": False,
+        "staged_input_locked": False,
+        "powerpoint_running": True,
+        "powerpoint_processes": [OWNED_PROCESS, USER_PROCESS],
+        "powerpoint_records": [
+            {
+                "source": "pending",
+                "run_id": "previous",
+                "pid": 5001,
+                "started_at": "2026-11-13T01:02:03.4567890Z",
+                "running": True,
+            }
+        ],
+        "abandoned": True,
+        "state_dir": "W:\\state",
+        **changes,
+    }
+
+
+def test_status_shows_powerpoint_processes_and_ownership(maintenance):
+    maintenance.value = owned_status()
+    status = renderers.renderer_status("powerpoint", {})
+    # slidekit が起動したと記録で確かめることができ、ウィンドウのない処理だけを --stop-owned の対象にする。
+    assert status["powerpoint_processes"] == [
+        {**OWNED_PROCESS, "stoppable": True},
+        {**USER_PROCESS, "stoppable": False},
+    ]
+    assert status["powerpoint_records"] == maintenance.value["powerpoint_records"]
+    assert status["pending"]["powerpoint"]["pid"] == 5001
+    # 一致してもウィンドウがあれば対象にしない。排他を持つ処理や、動いている作業プロセスがあれば、どれも対象にしない。
+    windowed = {**OWNED_PROCESS, "window_title": "資料.pptx - PowerPoint", "has_window": True}
+    maintenance.value = owned_status(powerpoint_processes=[windowed])
+    assert [item["stoppable"] for item in renderers.renderer_status("powerpoint", {})["powerpoint_processes"]] == [
+        False
+    ]
+    for changes in ({"busy": True, "holder": ACTIVE}, {"pending_process_alive": True}):
+        maintenance.value = owned_status(**changes)
+        processes = renderers.renderer_status("powerpoint", {})["powerpoint_processes"]
+        assert [(item["owned"], item["stoppable"]) for item in processes] == [(True, False), (False, False)]
+    # 残存記録がなくても、前の処理が残した使用中の記録と一致する処理は対象にする。
+    maintenance.value = owned_status(
+        pending=None,
+        pending_exists=False,
+        pending_process_alive=None,
+        staged_input_locked=None,
+        powerpoint_processes=[{**OWNED_PROCESS, "record": "active"}],
+    )
+    idle = renderers.renderer_status("powerpoint", {})
+    assert (idle["status"], idle["exit_code"]) == ("idle", 0)
+    assert idle["powerpoint_processes"][0]["stoppable"] is True
+    # 1 件の配列が要素だけになった結果と、不正な値も扱う。一致しない処理の record は None にする。
+    maintenance.value = owned_status(
+        powerpoint_processes={**USER_PROCESS, "record": "pending", "pid": True},
+        powerpoint_records="x",
+    )
+    single = renderers.renderer_status("powerpoint", {})
+    assert single["powerpoint_processes"] == [{**USER_PROCESS, "pid": None, "stoppable": False}]
+    assert single["powerpoint_records"] == []
+    libreoffice = renderers.renderer_status("libreoffice", {})
+    assert (libreoffice["powerpoint_processes"], libreoffice["powerpoint_records"]) == (None, None)
+
+
+def test_clear_stop_owned_passes_flag_and_reports_stopped(maintenance):
+    maintenance.value = {
+        "ok": True,
+        "status": "cleared",
+        "reason": "slidekit が起動した PowerPoint（PID 5001）を終了し、残存記録を解除しました。",
+        "archived": "W:\\state\\cleared\\20261113T010203000Z-pending.json",
+        "removed_work_dir": True,
+        "removed_old_work_dirs": 0,
+        "pending": OWNED_PENDING,
+        "stopped": [{"pid": 5001, "started_at": "2026-11-13T01:02:03.4567890Z", "record": "pending"}],
+    }
+    cleared = renderers.clear_pending("powerpoint", {}, stop_owned=True)
+    (command,) = maintenance.commands
+    assert command[-1] == "-StopOwned" and "-Force" not in command
+    assert cleared["stopped_powerpoint"] == [
+        {"pid": 5001, "started_at": "2026-11-13T01:02:03.4567890Z", "record": "pending"}
+    ]
+    assert (cleared["status"], cleared["exit_code"]) == ("cleared", 0)
+    renderers.clear_pending("powerpoint", {}, force=True, stop_owned=True)
+    assert maintenance.commands[-1][-2:] == ["-Force", "-StopOwned"]
+    # 確かめることができなければ断る（作業スクリプトが理由を返す）。PowerShell 5.1 が 1 件の配列を要素にした結果も一覧にする。
+    maintenance.value = {
+        "ok": True,
+        "status": "refused",
+        "reason": "残存記録に、変換に使った PowerPoint の PID と開始時刻がありません。",
+        "stopped": {"pid": 5003, "started_at": None, "record": "active"},
+    }
+    refused = renderers.clear_pending("powerpoint", {}, stop_owned=True)
+    assert (refused["status"], refused["exit_code"]) == ("refused", 1)
+    assert refused["stopped_powerpoint"] == [{"pid": 5003, "started_at": None, "record": "active"}]
+    assert renderers.clear_pending("libreoffice", {}, stop_owned=True)["stopped_powerpoint"] == []
+
+
+def test_cli_passes_stop_owned(monkeypatch, capsys, isolated_environment):
+    from slidekit import cli
+
+    seen = []
+
+    def clear(name, environment, *, force=False, stop_owned=False, **options):
+        seen.append((name, force, stop_owned))
+        return {
+            "command": "renderer clear",
+            "renderer": name,
+            "status": "cleared",
+            "reason": "slidekit が起動した PowerPoint（PID 5001）を終了し、残存記録を解除しました。",
+            "stopped_powerpoint": [{"pid": 5001, "started_at": "2026-11-13T01:02:03Z", "record": "pending"}],
+            "exit_code": 0,
+        }
+
+    monkeypatch.setattr(renderers, "clear_pending", clear)
+    assert cli.main(["renderer", "clear", "--stop-owned"]) == 0
+    assert seen[-1] == ("powerpoint", False, True)
+    assert "終了した PowerPoint: PID 5001（開始 2026-11-13T01:02:03Z）" in capsys.readouterr().out.splitlines()
+    assert cli.main(["renderer", "clear"]) == 0
+    assert seen[-1] == ("powerpoint", False, False)
+
+
+def next_step(lines):
+    """要約の「次の操作」の行（最後の「結果」の行の前にある）。"""
+    (line,) = [line for line in lines if line.startswith("次の操作")]
+    return line
+
+
+def test_status_summary_explains_powerpoint_ownership(maintenance):
+    from slidekit.report import summarize
+
+    maintenance.value = owned_status()
+    lines = summarize("renderer status", renderers.renderer_status("powerpoint", {})).splitlines()
+    assert "  変換に使った PowerPoint: slidekit が起動（PID 5001、動作中）" in lines
+    assert "PowerPoint: 起動中（2 個）" in lines
+    assert "  PID 5001、ウィンドウなし、開始 2026-11-13T01:02:03.4567890Z、slidekit が起動（残存記録と一致）" in lines
+    assert (
+        "  PID 5002、題名「deck.pptx - PowerPoint」、開始 2026-11-13T00:00:00.0000000Z、"
+        "slidekit が起動した記録と一致しない" in lines
+    )
+    assert next_step(lines).startswith(
+        "次の操作: slidekit renderer clear --stop-owned（slidekit が起動した PowerPoint（PID 5001）を終了してから解除する）"
+    )
+    # 記録の PowerPoint がもう動いていなければ、ほかの PowerPoint があっても --force なしで解除できる。
+    gone = owned_status(
+        powerpoint_processes=[USER_PROCESS],
+        powerpoint_records=[{**owned_status()["powerpoint_records"][0], "running": False}],
+    )
+    maintenance.value = gone
+    lines = summarize("renderer status", renderers.renderer_status("powerpoint", {})).splitlines()
+    assert "  変換に使った PowerPoint: slidekit が起動（PID 5001、終了済み）" in lines
+    assert "  検査用の複製: 開かれていない" in lines
+    assert next_step(lines).endswith("次の操作: slidekit renderer clear")
+    # 古い記録（PowerPoint の記録なし）と、既に起動していた PowerPoint を使った記録は --force を示す。
+    for pending, text in (
+        ({"run_id": "old", "status": "timeout"}, "記録なし（古い形式の記録か、PowerPoint を起動する前の記録）"),
+        ({**OWNED_PENDING, "powerpoint": {"started": False}}, "既に起動していた PowerPoint（slidekit は終了しない）"),
+    ):
+        maintenance.value = owned_status(pending=pending, powerpoint_processes=[USER_PROCESS], powerpoint_records=[])
+        lines = summarize("renderer status", renderers.renderer_status("powerpoint", {})).splitlines()
+        assert f"  変換に使った PowerPoint: {text}" in lines
+        assert next_step(lines).endswith("slidekit renderer clear --force を実行する")
+    # 残存記録がなく、前の処理が残した PowerPoint があるときも示す。
+    maintenance.value = owned_status(
+        pending=None,
+        pending_exists=False,
+        pending_process_alive=None,
+        staged_input_locked=None,
+        powerpoint_processes=[{**OWNED_PROCESS, "record": "active"}, USER_PROCESS],
+        powerpoint_records=[],
+    )
+    lines = summarize("renderer status", renderers.renderer_status("powerpoint", {})).splitlines()
+    assert "slidekit が起動した PowerPoint が残っている: PID 5001" in lines
+    assert (
+        "  PID 5001、ウィンドウなし、開始 2026-11-13T01:02:03.4567890Z、slidekit が起動（使用中の記録と一致）" in lines
+    )
+    assert next_step(lines) == (
+        "次の操作: slidekit renderer clear --stop-owned（slidekit が起動した PowerPoint（PID 5001）を終了する）"
+    )
 
 
 @pytest.mark.parametrize("worker_wrote_record", [True, False])
@@ -1103,19 +1326,47 @@ def test_font_comparison_checks_same_file_first(tmp_path, monkeypatch):
 def test_worker_script_requires_force_while_powerpoint_runs():
     # PowerPoint は読み取り専用で開いた複製のファイルを開いたままにしないので、排他で開くことに成功しても、PowerPoint が複製を開いていないとは言えない
     # （PowerPoint 16.0、build 20430 で確かめた）。PowerPoint が起動していれば、複製の有無によらず --force を求める。
+    # 例外は、残存記録の変換に使った PowerPoint が slidekit の起動したものと記録されていて、もう動いていないときだけである。
     script = Path(renderers.__file__).with_name("powerpoint.ps1").read_text(encoding="utf-8")
-    clear = script[script.index("function Invoke-Clear") : script.index("function Remove-OwnWorkFolder")]
-    assert "if ($running -and (-not $Force))" in clear
+    clear = worker_function(script, "Invoke-Clear")
+    condition = "if ($running -and (-not $Force) -and (-not (Test-RecordedPowerPointGone $record)))"
+    assert condition in clear
     assert "$null -eq $inputLocked" not in clear
     # 排他で開けない複製は、--force でも断る。
-    assert clear.index("if ($inputLocked -eq $true)") < clear.index("if ($running -and (-not $Force))")
+    assert clear.index("if ($inputLocked -eq $true)") < clear.index(condition)
+    # 記録の PowerPoint の開始時刻を取得できなければ、動いているとみなす（--force を求める側に倒す）。
+    gone = worker_function(script, "Test-RecordedPowerPointGone")
+    assert "if ($null -eq $start -or [long]$start.start_time -eq $target.start_time) { return $false }" in gone
+
+
+def worker_function(script, name):
+    """作業スクリプトの関数の本文（次の関数の定義の前まで）。"""
+    start = re.search(rf"^function {re.escape(name)}[ (]", script, re.M).start()
+    end = script.find("\nfunction ", start + 1)
+    return script[start : end if end >= 0 else len(script)]
 
 
 def test_worker_script_never_kills_powerpoint():
     script = Path(renderers.__file__).with_name("powerpoint.ps1").read_text(encoding="utf-8")
     assert "Stop-Process" not in script
     assert "taskkill" not in script.lower()
-    assert ".Kill(" not in script
+    # 強制終了は、slidekit が起動したと記録で確かめた PowerPoint を、Clear の -StopOwned で終了する 1 か所だけである。
+    stop = worker_function(script, "Stop-OwnedPowerPoint")
+    assert script.count(".Kill(") == stop.count(".Kill(") == 1
+    # 記録と PID・開始時刻が一致する処理（Get-OwnedProcesses）だけを対象にし、ウィンドウがあるか、ハンドルを開くことが
+    # できなければ、どれも終了せずに断る（終了の前にすべてを確かめる）。
+    assert "Get-OwnedProcesses $records" in stop
+    assert stop.index("$item.info.has_window") < stop.index("$item.opened") < stop.index(".Kill(")
+    owned = worker_function(script, "Get-OwnedProcesses")
+    assert owned.index("$process.Handle") < owned.index("Get-PowerPointInfo") < owned.index("Find-OwnedRecord")
+    find = worker_function(script, "Find-OwnedRecord")
+    assert "$record.pid -eq $info.pid -and $record.start_time -eq" in find
+    assert "if ($null -eq $info.start_time) { return $null }" in find
+    # 呼ぶのは Invoke-Clear の -StopOwned のときだけで、残存記録があれば作業プロセスが動いていないことを確かめた後である。
+    assert script.count("Stop-OwnedPowerPoint $records") == 2
+    clear = worker_function(script, "Invoke-Clear")
+    assert clear.count("if ($StopOwned) {") == 3
+    assert clear.index("Test-ProcessAlive $processId") < clear.rindex("Stop-OwnedPowerPoint $records")
     assert "Global\\Slidekit.PowerPoint." in script
     assert "$presentation.Close()" in script
     assert "(-not $existing)" in script
@@ -1127,3 +1378,46 @@ def test_worker_script_never_kills_powerpoint():
     assert "$ProgressPreference = 'SilentlyContinue'" in script
     assert "WaitOne(1000)" in script
     assert "active.json" in script
+
+
+def test_worker_script_records_powerpoint_it_started():
+    # PowerPoint を起動したら、PID と開始時刻（UTC の FILETIME の整数）を使用中の記録と残存記録に書き、後で照合する。
+    # 実際の値の往復（PowerShell 5.1 の JSON）は PowerPoint を使わずに Windows で確かめた（記録は試験の外）。
+    script = Path(renderers.__file__).with_name("powerpoint.ps1").read_text(encoding="utf-8")
+    start = worker_function(script, "Get-StartTime")
+    assert "ToFileTimeUtc()" in start
+    new_app = worker_function(script, "New-App")
+    assert "if ($added.Count -eq 1)" in new_app and "$script:powerpoint.pid = $added[0].Id" in new_app
+    assert new_app.index("$script:powerpoint = ") < new_app.index("Write-JsonFile $active $script:activeRecord")
+    # 生成記録の powerpoint_started の意味（処理が増えたか）は変えない。
+    assert new_app.rstrip().endswith("return ($added.Count -gt 0)\n}")
+    pending = worker_function(script, "Write-Pending")
+    assert "powerpoint=$script:powerpoint" in pending and "$record.status = [string]$current.status" in pending
+    # 開く前に残存記録を書き、PowerPoint を起動したら書き直してから開く（やり直しのときも同じ）。
+    render = worker_function(script, "Invoke-Render")
+    assert render.count("Write-Pending $fields") == 3
+    assert render.index("$started = New-App") < render.index(
+        "Write-Pending $fields", render.index("$started = New-App")
+    )
+    assert render.index("Write-Pending $fields") < render.index("Presentations.Open")
+    # 古い記録（powerpoint がない）は照合に使わない。
+    records = worker_function(script, "Get-OwnedRecords")
+    assert (
+        "if ($owned.started -ne $true -or $null -eq $owned.pid -or $null -eq $owned.start_time) { continue }" in records
+    )
+
+
+def test_worker_script_cleans_up_after_detach():
+    script = Path(renderers.__file__).with_name("powerpoint.ps1").read_text(encoding="utf-8")
+    session = script[script.index("# Session\n") :]
+    cleanup = session[session.index("} finally {") :]
+    # 切り離しのときに Python 側が書いた、この実行の残存記録は、変換が終わっていて複製を閉じた場合だけ消す。
+    assert "if ($locked -and (-not $rendering) -and (-not $keepPending)) { Remove-OwnPending }" in cleanup
+    assert "$record.run_id -eq $RunId" in worker_function(script, "Remove-OwnPending")
+    # 自分で起動した PowerPoint を終了できなかったときは、照合のために使用中の記録を残す。
+    assert "$keepActive = (-not $existing) -and (-not $quit)" in cleanup
+    assert cleanup.index("$app.Quit()") < cleanup.index("$keepActive = ") < cleanup.index("Unlock-Mutex")
+    # 残存記録があって断るときは、使用中の記録を書かない（前の処理が残した記録を消さない）。
+    assert session.index("if (Test-Path -LiteralPath $pending) {") < session.index(
+        "Write-JsonFile $active $activeRecord"
+    )

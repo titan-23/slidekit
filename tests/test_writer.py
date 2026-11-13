@@ -294,6 +294,18 @@ def test_fragment_runs_have_own_size_bold_color_underline_and_link(tmp_path):
     assert link.get("Type").endswith("/hyperlink")
 
 
+def test_superscript_fragment_writes_baseline_offset(tmp_path):
+    content = [
+        {"kind": "text", "text": "脚注"},
+        {"kind": "text", "text": "1", "style": {"superscript": True}},
+    ]
+    shapes = written(tmp_path, [element(content=content)])
+    properties = [run.find("a:rPr", NS) for run in text_runs(shapes["label"])]
+    # PowerPoint の上付きの既定と同じ 30 % だけ基準線を上げる（大きさは PowerPoint が 3 分の 2 に縮めて描く）。
+    assert [node.get("baseline") for node in properties] == [None, "30000"]
+    assert [node.get("sz") for node in properties] == ["2400", "2400"]
+
+
 def test_line_break_uses_fragment_properties(tmp_path):
     # a:br に書式がないと、PowerPoint は空の行を雛形の既定の文字サイズ（18 pt）で置く。改行がある断片の実効書式を書く。
     content = [

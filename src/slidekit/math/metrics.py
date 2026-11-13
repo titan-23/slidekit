@@ -29,7 +29,7 @@ PowerPoint の照合データ（`tests/data/powerpoint_math.json` の形）と�
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 import json
 import math
 from pathlib import Path
@@ -72,7 +72,7 @@ __all__ = [
 ]
 
 # 組み方を変えたら上げる。FontRegistry.inventory() に入れ、計測の方法が変わったことを証拠に反映する。
-ENGINE_VERSION = "opentype-3"
+ENGINE_VERSION = "opentype-4"
 
 # Office Math に合わせる値。MathML Core・TeX・OpenType の MATH 表の規則を基に、PowerPoint 16.0.20430.20146 で
 # 変換した PDF の字形の位置と照合して決めた（2026-10-12。照合データ tests/data/powerpoint_math.json、
@@ -108,9 +108,14 @@ OFFICE: dict[str, object] = {
     # （PowerPoint は \max( と同じく \max\{ の { の前も空けない。2026-10-20、生成した資料の PDF）
     "function_space_em": 3 / 18,
     "function_space_brackets": "([{",
-    # 伸びる括弧の目標の長さに掛ける係数。目標に係数を掛けた長さ以上の最初の候補を選ぶ（TeX の \delimiterfactor の 901 と同じ。
-    # \binom・\left(\frac{a}{b}\right) などの括弧の大きさが合う）
+    # 伸びる括弧の目標の長さに掛ける係数（TeX の \delimiterfactor の 901 と同じ）。長い括弧には短差の上限も適用する
     "delimiter_factor": 0.901,
+    # 必要な長さより短くてよい量（em）。TeX の \delimitershortfall と同じ制限。PowerPoint の 17 ケースで求めた
+    # 共通の範囲は 0.1509〜0.1736 em（2026-10-23、20 pt、Cambria Math）。その範囲内の 0.16 em を使う
+    "delimiter_shortfall_em": 0.16,
+    # この高さを軸からの距離が超える中身は、一つの大きな式として扱い、中身の中心に括弧を置く。Office は
+    # DelimitedSubFormulaMinHeight と DisplayOperatorMinHeight を逆に読む（大型演算子の規則と対になる）
+    "delimiter_subformula_min_height": "DisplayOperatorMinHeight",
     # 根号の字形が必要な長さより長いとき、余りの半分を中身の上の空きに加える（TeX・MathML Core と同じ）。偽なら余りを下に出す
     "radical_excess_above": True,
     # 関数の適用（本体のある関数名。書き出しは m:func）の右側を inner として扱う。後に普通の文字・句読点・開き括弧が続くと
@@ -131,6 +136,9 @@ OFFICE: dict[str, object] = {
     "bare_function_limits_ord": True,
     # 文中の数式の分数で、分子と分母を 1 段縮める（分子・分母は 20 pt の 73 %）
     "inline_fraction_shrink": True,
+    # 入れ子の分数の外側の線は、通常の送り幅より左右へ張り出す。内側の分数には半分の余白を加える
+    # （20 pt の式では送り幅に 2 pt、線の描画幅に 4 pt。2026-10-23 の PowerPoint の PDF で照合）。
+    "nested_fraction_padding_em": 0.1,
     # 独立した数式の大型演算子の字形。min_height は display_operator_min_height の定数以上の最初の候補、next は基本の次の候補
     "display_operator_variant": "min_height",
     # 独立した数式の大型演算子の最小の高さに使う MATH 表の定数。Office は DisplayOperatorMinHeight と
@@ -326,6 +334,32 @@ def _ends_with_application(nodes) -> bool:
     return bool(nodes) and isinstance(nodes[-1], Function) and bool(nodes[-1].body)
 
 
+def _delimiter_body(nodes, *, all_scripts: bool) -> tuple:
+    """括弧の寸法の判定用の中身。大型演算子の添字を除き、all_scripts なら普通の添字も除く。
+
+    文中の大型演算子の添字は括弧を伸ばさない。大きな式への切り替えも添字を除いた本体で判定するので、
+    分数の分子に上付きが付いたときは、その高さだけで括弧の中心を移さない。描画する中身は変更しない。
+    """
+    result = []
+    for node in nodes:
+        if all_scripts and isinstance(node, Scripts):
+            result.extend(_delimiter_body(node.base, all_scripts=True))
+            continue
+        changes = {"sub": None, "sup": None} if isinstance(node, Nary) else {}
+        for entry in fields(node):
+            value = getattr(node, entry.name)
+            if entry.name in changes or not isinstance(value, tuple) or not value:
+                continue
+            if isinstance(value[0], tuple):
+                changed = tuple(_delimiter_body(part, all_scripts=all_scripts) for part in value)
+            else:
+                changed = _delimiter_body(value, all_scripts=all_scripts)
+            if changed != value:
+                changes[entry.name] = changed
+        result.append(replace(node, **changes) if changes else node)
+    return tuple(result)
+
+
 def _number_separators(items: list) -> None:
     """数字の間のカンマとピリオド（1,2）を数の一部として ord にする（Office Math の数の扱い）。
 
@@ -367,11 +401,14 @@ def _convert_binary(atoms: list[_Box]) -> None:
 class _Engine:
     """1 回の組み立て。文字サイズ・太字・文字用の書体と、OFFICE の値の写しを持つ。"""
 
-    def __init__(self, font: MathFont, size: float, bold: bool, text_fonts: TextFonts | None) -> None:
+    def __init__(
+        self, font: MathFont, size: float, bold: bool, text_fonts: TextFonts | None, *, display: bool = False
+    ) -> None:
         self.font = font
         self.size = size
         self.bold = bold
         self.text_fonts = text_fonts
+        self.display = display
         self.office = dict(OFFICE)
         script = font.constant("ScriptPercentScaleDown") or 0.8
         scriptscript = font.constant("ScriptScriptPercentScaleDown") or 0.6
@@ -560,7 +597,6 @@ class _Engine:
     def text(self, node: Text, style: _Style) -> _Box:
         """\\text の文章。書き出しと同じ大きさ（office_math.text_size()：段 1 は 73 %、段 2 以降は 60 % を 1/100 pt に
         丸める）で計測する。倍率は数式の書体によらない（数式の文字は書体の ScriptPercentScaleDown で縮める）。
-        独立した数式の入れ子の分数の中では、書き出しは縮めないが、計測では数式の文字と同じく 1 段縮める（docs/math.md の「残る差」）。
         """
         if self.text_fonts is None:
             return self.glyphs(node.text, "upright", None, "ord", style.level, script=False)
@@ -676,20 +712,43 @@ class _Engine:
     # 構造
 
     def fenced(self, node: Fenced, style: _Style) -> _Box:
-        """\\left・\\right の括弧。中身の数式の軸からの上下の大きい方の 2 倍の長さに伸ばし、軸の上下に等しく置く。"""
+        """\\left・\\right の括弧。通常は数式の軸を中心にし、背の高い中身では中身の中心に置く。"""
         level = style.level
+        scale = self.em(level)
         parts = [self.sequence(part, style) for part in node.parts]
         axis = self.constant("AxisHeight", level)
-        extent = 0.0
-        for part in parts:
-            if part.ink is not None:
-                extent = max(extent, part.ink[2] - axis, part.ink[3] + axis)
-        target = 2.0 * extent * float(self.office["delimiter_factor"]) / self.em(level)
+
+        def bodies(*, all_scripts: bool) -> list[_Box]:
+            result = []
+            for nodes, original in zip(node.parts, parts):
+                stripped = _delimiter_body(nodes, all_scripts=all_scripts)
+                result.append(original if stripped == nodes else self.sequence(stripped, style))
+            return result
+
+        sized = parts if style.display else bodies(all_scripts=False)
+        plain = bodies(all_scripts=True)
+        top = max((part.height for part in sized), default=0.0)
+        bottom = max((part.depth for part in sized), default=0.0)
+        extent = max(top - axis, bottom + axis, 0.0)
+        plain_extent = max([0.0] + [max(_top(part) - axis, _bottom(part) + axis) for part in plain])
+        subformula = plain_extent > self.constant(str(self.office["delimiter_subformula_min_height"]), level)
+        center = (top - bottom) / 2 if subformula else axis
+        height = top + bottom if subformula else 2.0 * extent
+        target = (
+            max(
+                height * float(self.office["delimiter_factor"]),
+                height - scale * float(self.office["delimiter_shortfall_em"]),
+            )
+            / scale
+        )
 
         def delimiter(char: str | None) -> _Box | None:
             if not char:
                 return None
-            return self.centered(self.vertical(self.font.glyph_for(char, "upright", None), target), level, "inner")
+            box = self.centered(self.vertical(self.font.glyph_for(char, "upright", None), target), level, "inner")
+            box.ink = _moved(box.ink, 0.0, center - axis)
+            box.height, box.depth = max(0.0, _top(box)), max(0.0, _bottom(box))
+            return box
 
         pieces = [delimiter(node.open)]
         for index, part in enumerate(parts):
@@ -708,7 +767,10 @@ class _Engine:
         level = style.level
         if node.kind == "lin":
             return self.linear_fraction(node, style)
-        child = level + 1 if not style.display and (level > 0 or self.office["inline_fraction_shrink"]) else level
+        # 独立した数式では段 0 の入れ子の分数も縮めない。分子・分母の配置自体は文中の組み方にするので、
+        # 文字サイズの段と、その分数の display の組み方は別に決める（書き出しの office_math と同じ段）。
+        shrink = level > 0 or (not self.display and self.office["inline_fraction_shrink"])
+        child = level + 1 if not style.display and shrink else level
         numerator = self.sequence(node.numerator, _Style(child, style.cramped, False))
         denominator = self.sequence(node.denominator, _Style(child, True, False))
         display = style.display
@@ -743,24 +805,34 @@ class _Engine:
                 - axis,
             )
             rule = (axis + thickness / 2, -(axis - thickness / 2))
-        width = max(numerator.width, denominator.width)
+        nested = node.kind != "noBar" and any(
+            isinstance(child, Fraction) and child.kind != "lin" for child in (*node.numerator, *node.denominator)
+        )
+        padding = self.em(level) * float(self.office["nested_fraction_padding_em"]) if nested else 0.0
+        width = max(numerator.width, denominator.width) + padding
         box = _Box(width=width, left="inner", right="inner")
         _place(box, numerator, (width - numerator.width) / 2, up)
         _place(box, denominator, (width - denominator.width) / 2, -down)
         if rule is not None:
-            box.ink = _union(box.ink, (0.0, width, rule[0], rule[1]))
+            box.ink = _union(box.ink, (-padding, width, rule[0], rule[1]))
             box.height = max(box.height, rule[0])
             box.depth = max(box.depth, rule[1])
         return box
 
     def linear_fraction(self, node: Fraction, style: _Style) -> _Box:
-        """横書きの分数（a/b）。分子、斜線、分母を同じ大きさで並べる。斜線は OFFICE["fraction_slash"] の字形にする。"""
+        """横書きの分数（a/b）。分子、斜線、分母を同じ大きさで並べ、斜線の中心を数式の軸に置く。"""
         slash = str(self.office["fraction_slash"])
         if not self.font.has_character(slash):
             slash = "/"
+        separator = self.character(slash, "ord", style.level)
+        if separator.ink is not None:
+            shift = self.constant("AxisHeight", style.level) - (_top(separator) - _bottom(separator)) / 2
+            separator.ink = _moved(separator.ink, 0.0, shift)
+            separator.height = max(0.0, separator.ink[2])
+            separator.depth = max(0.0, separator.ink[3])
         items = [
             self.sequence(node.numerator, style),
-            self.character(slash, "ord", style.level),
+            separator,
             self.sequence(node.denominator, style),
         ]
         box = self.pack(items, style.level, spacing=False)
@@ -1122,7 +1194,7 @@ def layout(
         raise ValueError("文字サイズは正の有限値にする")
     if text_fonts is not None and not isinstance(text_fonts, TextFonts):
         raise TypeError("text_fonts は TextFonts で指定する")
-    engine = _Engine(font, size, bool(bold), text_fonts)
+    engine = _Engine(font, size, bool(bold), text_fonts, display=bool(display))
     box = engine.sequence(tuple(nodes), _Style(0, False, bool(display)))
     width = box.width
     if not display and engine.office["italic_trailing"] and box.slanted_end:

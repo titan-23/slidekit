@@ -483,7 +483,7 @@ class _Fields(Mapping):
         return f"<文献 {self._key} の項目: {'、'.join(self._raw)}>"
 
 
-_STYLE_NAMES = frozenset({"bold", "color", "size_pt", "underline", "link"})
+_STYLE_NAMES = frozenset({"bold", "color", "size_pt", "underline", "superscript", "link"})
 _MATH_STYLE_NAMES = frozenset({"bold", "color", "size_pt"})
 
 

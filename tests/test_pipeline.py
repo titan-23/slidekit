@@ -720,7 +720,7 @@ def test_selected_chapters_can_be_checked_while_another_chapter_fails(local_proj
         "（2 ページ（first_intro、first_detail。選んだ章だけを構築））"
     )
     assert any(line.startswith("  ページ first_detail エラー text_overflow body") for line in lines)
-    assert lines[-1].endswith("--slides first_detail")
+    assert lines[-2].endswith("--slides first_detail")
     # ページ番号を含む指定では、番号を決めるために全ページを作るので、書きかけの章の例外になる。
     numbered = pipeline.layout(local_project, slides="1")
     assert (numbered["exit_code"], codes(numbered)) == (2, ["build_failed"])
@@ -764,7 +764,7 @@ def test_unknown_slides_are_reported_as_input_error(local_project):
         lines = summarize(command, result).splitlines()
         assert f"  エラー invalid_selection {message}" in lines
         assert not any("トレースバック" in line or "slidekit の内部で発生" in line for line in lines)
-        assert lines[-1] == f"次の操作: --slides の指定を直して slidekit {command} を再実行する"
+        assert lines[-2] == f"次の操作: --slides の指定を直して slidekit {command} を再実行する"
     # 範囲外の番号も同じ扱いにする。資料のコードの例外はこれまでどおり場所とトレースバックを示す。
     rewrite(local_project, pages_source("first", "second"))
     result = pipeline.layout(local_project, slides="5")
@@ -777,7 +777,7 @@ def test_unknown_slides_are_reported_as_input_error(local_project):
     (error,) = failed["issues"]
     assert error["code"] == "build_failed" and error["observations"][0]["location"]["in_project"] is True
     assert "Traceback" in stream.getvalue()
-    assert summarize("layout", failed).splitlines()[-1] == "次の操作: 原因を直して slidekit layout を再実行する"
+    assert summarize("layout", failed).splitlines()[-2] == "次の操作: 原因を直して slidekit layout を再実行する"
 
 
 def test_selection_is_passed_to_deck_code(local_project):
@@ -1536,8 +1536,13 @@ def test_page_insert_carries_unchanged_content_and_same_digit_visuals(local_proj
     ]
     from slidekit.report import summarize
 
+    # 引き継ぎ元と、ページ番号だけ変わったページを比べた実行を示す。
+    first_run = Path(result["carry"]["compared_run"] or "0001").name
+    assert result["carry"]["renumbered_from"] == {first_run: 3}
     assert any(
-        line.startswith("確認の引き継ぎ: 7 件（ページ番号だけ変わったページ 3 件、")
+        line.startswith(
+            f"確認の引き継ぎ: 7 件（引き継ぎ元 {first_run} 7 件、ページ番号だけ変わったページ 3 件（実行 {first_run} と比較）、"
+        )
         for line in summarize("build", result).splitlines()
     )
     status = records.review_status(second)
@@ -1793,3 +1798,57 @@ def build(context):
     assert str(base / "deck_text.py") not in project.input_files
     assert sys.path == path_before
     assert not {"deck_text", "base_text"} & set(sys.modules)
+
+
+def test_page_number_format_and_frame_change_carries_visuals_as_renumbered(local_project):
+    # ページ番号の書式と枠だけを変えると、番号の図形を除いた証拠が一致し、番号の領域（変更前と後の両方）を除いた画像も一致する。
+    # 表示の確認はページ番号だけ変わったページとして引き継ぎ、内容の確認もそのまま引き継ぐ。
+    rewrite(local_project, pages_source("first", "second"))
+    first = built(local_project)
+    finish_review(first)
+    theme = local_project / "theme.toml"
+    theme.write_text(
+        theme.read_text(encoding="utf-8")
+        + '[page_kinds.content]\npage_number_format = "{page} / {total}"\nfooter_area_pt = [820, 505, 100, 24]\n',
+        encoding="utf-8",
+    )
+    result = pipeline.build(local_project / "deck.toml")
+    second = Path(result["build"])
+    assert result["carry"]["renumbered"] == ["first", "second"]
+    copies = [record for record in records._review(second)["records"] if record["kind"] == "visual"]
+    assert {record["slide_id"] for record in copies} == {"first", "second"}
+    for record in copies:
+        check = record["render_check"]
+        assert check["footer_only"] is True and len(check["masked"]) == 2
+        assert check["source_evidence_hash"] != record["evidence_hash"]
+    status = records.review_status(second)
+    pending = {group["kind"] for group in status["reviews"] if group["pending"]}
+    # 一覧画像は毎回確かめ直す。ページの表示と内容は引き継いだ。
+    assert pending == {"overview"}
+    # 引き継いだ写しは、最終検査と同じ基準でも有効である。
+    assert all(records._valid_record(second, record, {})[0] for record in copies)
+
+
+def test_build_compares_page_images_with_previous_run_and_writes_sheets(local_project):
+    # 生成の後に、前の実行とページ画像を比べる。変えたページだけを「変わった」とし、比較画像に枠を描く。
+    rewrite(local_project, pages_source("first", "second", "third"))
+    first = built(local_project)
+    finish_review(first)
+    rewrite(local_project, pages_source("first", "second", "third", titles={"second": "Changed title"}))
+    result = pipeline.build(local_project / "deck.toml")
+    second = Path(result["build"])
+    comparison = result["comparison"]
+    assert comparison["run"] == first.name
+    assert (comparison["unchanged"], comparison["changed"], comparison["added"]) == (["first", "third"], ["second"], [])
+    from slidekit.report import summarize
+
+    assert (
+        f"前の実行 {first.name} との比較: 変更なし 2、ページ番号だけ変わった 0、変わった 1（p.2）"
+        in summarize("build", result).splitlines()
+    )
+    sheet = records.review_sheet(second)
+    assert sheet["slides"] == ["second"] and sheet["changes"] == {"second": "changed"}
+    assert sheet["compared_run"] == first.name
+    assert all(Path(path).is_file() and Path(path).parent == second / "sheets" for path in sheet["sheets"])
+    # 比較画像は成果物ではないので、整合検査に影響しない。
+    assert records.check_build(second)["status"] == "passed"

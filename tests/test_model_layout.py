@@ -333,6 +333,38 @@ def test_stack_places_elements_with_gap_and_reports_bounds(make_deck):
     assert open_stack.take(500) == Rect(500, tail.area.bottom + 12, 200, 500)
 
 
+def test_stack_avoids_page_number_area(make_deck):
+    """avoid="footer" は、幅を指定しない要素がページ番号の領域に重なるとき、領域の左に収まる幅で作り直す。"""
+    deck = make_deck()
+    slide = deck.slide(id="avoid")
+    footer = slide.footer_area
+    assert footer is not None
+    width, height = deck.project.size
+    area = Rect(48, footer.y - 40, footer.right - 48, height - (footer.y - 40))
+    stack = slide.stack(area, gap=12, avoid="footer")
+    stack.space(30)
+    line = stack.text(id="line", text="ABCD EFGH")
+    # 領域の左へ 8 pt（gap が 8 より大きいときは 8）空けて収める。重ならない要素はそのまま。
+    assert line.area.right == pytest.approx(footer.x - 8) and line.area.x == 48
+    assert not (line.area.right > footer.x and line.area.bottom > footer.y)
+    plain = slide.stack(Rect(48, 100, 400, None), avoid="footer").text(id="plain", text="ABCD")
+    assert plain.area.w == 400
+    # 幅を指定した要素は動かさない。
+    fixed = slide.stack(area, avoid="footer")
+    fixed.space(30)
+    kept = fixed.text(id="fixed", text="ABCD", width=area.w)
+    assert kept.area.w == area.w
+    # 全幅を覆う領域は、要素をその下へ送る。
+    band = Rect(40, 200, 900, 30)
+    below = slide.stack(Rect(48, 190, 400, None), avoid=[band]).text(id="below", text="ABCD")
+    assert below.area.y == band.bottom + 12
+    with pytest.raises(InputError, match="avoid は Rect"):
+        slide.stack(area, avoid=["header"])
+    # ページ番号を置かないページでは footer を避ける領域にしない。
+    cover = deck.slide(id="cover", kind="cover")
+    assert cover.footer_area is None and cover.stack(area, avoid="footer").text(id="c", text="AB").area.w == area.w
+
+
 def test_stack_rejects_invalid_arguments_and_leaves_nothing(make_deck):
     deck = make_deck()
     png(deck.project.root, size=(100, 100))
@@ -688,3 +720,20 @@ def test_image_input_errors_name_the_element(make_deck):
         assert (error.code, error.slide_id, error.element_id) == (code, "images", "photo"), words
         assert str(error).startswith("ページ images の要素 photo: ")
     assert not slide.elements
+
+
+def test_phrase_wrap_inserts_breaks_at_phrase_boundaries(make_deck):
+    """phrase_wrap は文節の境で折り返し、場面の断片にその位置の明示改行を入れる（PowerPoint の折り返しを固定する）。"""
+    deck = make_deck()
+    slide = deck.slide(id="phrase")
+    text = "届いたため、末尾を指す処理を書く"
+    plain = slide.text(id="plain", text=text, area=Rect(48, 100, 70, None), size_pt=20, role="body")
+    phrased = slide.text(id="phrased", text=text, area=Rect(48, 300, 70, None), size_pt=20, phrase_wrap=True)
+    assert [line.wrap for line in plain.measure().lines].count("mid_phrase") >= 1
+    lines = phrased.measure().lines
+    assert "mid_phrase" not in [line.wrap for line in lines]
+    elements = {element["id"]: element for element in deck.to_dict()["slides"][0]["elements"]}
+    written = "".join(fragment["text"] for fragment in elements["phrased"]["content"])
+    assert written.split("\n") == [line.text.rstrip() for line in lines]
+    # 指定のない要素の断片は変えない。
+    assert "".join(fragment["text"] for fragment in elements["plain"]["content"]) == text

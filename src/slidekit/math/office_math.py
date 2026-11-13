@@ -162,7 +162,8 @@ def _run(text, style, variant, options):
 
 
 def _text_run(text, options):
-    # 通常の文章（m:nor）。m:nor と m:sty は同時に書くことができないので m:sty を置かない。中身は置き換えない。
+    # 通常の文章（m:nor）。m:nor と m:sty は同時に書くことができないので m:sty を置かない。中身は構文解析のとおりで、
+    # - は解析でハイフン（U+2010）にしてある（PowerPoint は m:nor の - もマイナス記号で描く）。
     # PowerPoint は m:nor の文字を添字の中でも縮めないので、段に応じて縮めた大きさを書く（数式の文字は PowerPoint が縮める）。
     # 和文の文字か、PowerPoint が lang="ja-JP" で和文の書体（a:ea）で描く記号（“ ” ‘ ’ × ○ など。measure.uses_east_asian_font）を
     # 含めば lang="ja-JP" にする。計測（文字の計測）では、これらの記号に和文の書体を使う。lang="en-US" では、PowerPoint は
@@ -229,7 +230,7 @@ def _node(node, options):
     if isinstance(node, Fraction):
         # 分子と分母の段：横書きは同じ段。独立した数式の段 0 の分数（入れ子の分数も）は同じ段で、それ以外は 1 段進める。
         # PowerPoint は独立した数式の入れ子の分数の分子と分母を縮めない（20 pt の式で 20.04 pt。文中の数式では縮める）ので、
-        # \text も縮めない。計測（math.metrics）では入れ子の分数を 1 段縮める（docs/math.md の「残る差」）。
+        # \text も縮めない。計測（math.metrics）も同じ段で計測する。
         if node.kind == "lin" or (options.display and options.level == 0):
             inner = options
         else:

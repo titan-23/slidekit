@@ -31,6 +31,7 @@ PAGE_KIND_KEYS = (
     "title_role",
     "default_role",
     "page_number",
+    "page_number_format",
     "background",
     "title_area",
     "content_area",
@@ -96,7 +97,7 @@ DECK_KEYS = MappingProxyType(
             "version",
         ),
         "inputs": ("read_roots", "python", "bibliography", "asset_dirs", "documents"),
-        "inputs.documents": ("id", "path"),
+        "inputs.documents": ("id", "path", "affects_content"),
         "render": ("primary", "required"),
         "math": ("fallback", "fallback_renderer", "fallback_scale", "functions"),
         "images": ("raster_scale", "vector"),
@@ -239,8 +240,32 @@ def _text(value: Any) -> str | None:
     return None if isinstance(value, str) and value.strip() else "は空でない文字列で指定してください"
 
 
+def _page_number_format(value: Any) -> str | None:
+    """ページ番号の書式。{page} を必ず含み、波括弧の欄は {page} と {total} だけにする。"""
+    problem = "は {page} を含み、波括弧の欄が {page} と {total} だけの文字列で指定してください"
+    if not isinstance(value, str) or "{page}" not in value:
+        return problem
+    try:
+        value.format(page=1, total=1)
+    except (KeyError, IndexError, ValueError):
+        return problem
+    return None
+
+
 def _non_negative(value: Any) -> str | None:
     return None if _is_number(value) and value >= 0 else "は 0 以上の有限の数で指定してください"
+
+
+def _skippable_check(value: Any) -> str | None:
+    """役割の skip_checks の項目：警告か参考の診断の識別子（エラーは外せない）。"""
+    from .diagnostics import DIAGNOSTICS
+
+    spec = DIAGNOSTICS.get(value) if isinstance(value, str) else None
+    if spec is None:
+        return "は診断の識別子で指定してください（docs/diagnostics.md）"
+    if spec.severity == "error":
+        return f"にエラーの診断 {value} は指定できません（警告と参考だけを外すことができます）"
+    return None
 
 
 def _choice(values: tuple[str, ...]) -> Callable[[Any], str | None]:
@@ -525,6 +550,8 @@ class _Checker:
                     self.array(item_key, item, _text)
                 elif item_name == "restricted":
                     self.value(item_key, item, _boolean)
+                elif item_name == "skip_checks":
+                    self.array(item_key, item, _skippable_check)
                 elif item_name in styles.ALL_STYLE_KEYS:
                     self.style_value(item_key, item_name, item)
 
@@ -546,6 +573,8 @@ class _Checker:
                     self.value(item_key, item, _text)
                 elif name == "page_number":
                     self.value(item_key, item, _boolean)
+                elif name == "page_number_format":
+                    self.value(item_key, item, _page_number_format)
                 elif name == "background":
                     # 色か "none"（背景の図形を作らない）。
                     self.style_value(item_key, "fill", item)
@@ -652,9 +681,11 @@ class _Checker:
             for name in item:
                 if name not in allowed:
                     self.add(key, f"{at}の {name} は不明な設定です", suggest(name, allowed))
-            for name in allowed:
+            for name in ("id", "path"):
                 if name not in item:
                     self.add(key, f"{at}に {name} を指定してください")
+            if "affects_content" in item and not isinstance(item["affects_content"], bool):
+                self.add(key, f"{at}の affects_content は真偽値で指定してください" + _value(item["affects_content"]))
             if "id" in item:
                 identifier = item["id"]
                 if problem := _text(identifier):

@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import sys
@@ -48,6 +49,9 @@ def make_run(project, name, status="built", *, schema=2, mode="full", selection=
     manifest = {
         "schema_version": schema,
         "run_id": name,
+        "project": str(project.path),
+        "project_root": str(project.root),
+        "config": {"output_dir": str(project.output_dir)},
         "status": status,
         "created_at": f"2026-10-01T00:00:{int(name):02d}+00:00",
     }
@@ -145,6 +149,100 @@ def test_clean_requires_a_condition(tmp_path):
         with pytest.raises(ValueError):
             runs.clean_runs(project, apply=True, **wrong)
     assert old.exists()
+
+
+@pytest.mark.parametrize("schema", [1, 2])
+@pytest.mark.parametrize("output_dir", ["out", "../build"])
+def test_clean_includes_unreferenced_runs_after_moving_project(tmp_path, schema, output_dir):
+    project = make_project(tmp_path / "original", output_dir)
+    old = make_run(project, "0001", schema=schema)
+    make_run(project, "0002", schema=schema)
+    # 相対パスで記録した実行保存先も、生成したときの資料のディレクトリから読む。
+    for run in old.parent.iterdir():
+        path = run / "manifest.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        manifest["config"]["output_dir"] = output_dir
+        save(path, manifest)
+    shutil.move(tmp_path / "original", tmp_path / "moved")
+    moved = make_project(tmp_path / "moved", output_dir)
+    before = {path: path.read_bytes() for path in moved.output_dir.glob("runs/*/manifest.json")}
+    preview = runs.clean_runs(moved, keep=1)
+    assert run_ids(preview) == {"0001"} and preview["protected"] == []
+    assert before == {path: path.read_bytes() for path in before}
+    assert runs.clean_runs(moved, keep=1, apply=True)["removed"] == [str(moved.output_dir / "runs" / "0001")]
+    assert (moved.output_dir / "runs" / "0002").is_dir()
+    assert not (tmp_path / "original").exists()
+
+
+def test_clean_after_moving_project_keeps_exports_and_carry_sources(tmp_path):
+    adopted = fixture_run(tmp_path)
+    complete(adopted)
+    records.export_build(adopted)
+    source = fixture_run(tmp_path, "0002")
+    complete(source)
+    copied = fixture_run(tmp_path, "0003")
+    records.carry_reviews(source, copied)
+    fixture_run(tmp_path, "0004")
+    destination = tmp_path / "moved"
+    destination.mkdir()
+    shutil.move(tmp_path / "project", destination / "project")
+    current = fixture_run(destination, "0005")
+    project = project_for(current)
+    preview = runs.clean_runs(project, keep=1)
+    assert run_ids(preview) == {"0003", "0004"}
+    protected = {Path(item["run"]).name: item["reasons"] for item in preview["protected"]}
+    assert "現在採用している実行" in protected["0001"]
+    assert protected["0002"] == ["確認記録の引き継ぎ元"]
+    applied = runs.clean_runs(project, keep=1, apply=True)
+    assert applied["removed"] == preview["candidate_paths"]
+    assert {path.name for path in current.parent.iterdir()} == {"0001", "0002", "0005"}
+
+
+@pytest.mark.parametrize("moved", [False, True])
+def test_clean_protects_other_projects_in_shared_output_directory(tmp_path, moved):
+    original = tmp_path / "original"
+    output = original / "shared"
+    first = make_project(original / "first", str(output))
+    second = make_project(original / "second", str(output))
+    own = make_run(first, "0001")
+    foreign = make_run(second, "0002")
+    interrupted = runs.new_run(second, command="build", options={})
+    rewrite_marker(interrupted, pid=DEAD_PID)
+    if moved:
+        destination = tmp_path / "moved"
+        shutil.move(original, destination)
+        output = destination / "shared"
+        first = make_project(destination / "first", str(output))
+        own, foreign, interrupted = (output / "runs" / path.name for path in (own, foreign, interrupted))
+    preview = runs.clean_runs(first, keep=0)
+    assert preview["candidate_paths"] == [str(own)]
+    # 別の資料の実行は、理由の識別子と、記録された資料の場所・実行保存先から見た位置で示す（中断した生成の印も同じ）。
+    assert {item["run"]: item["reason_codes"] for item in preview["protected"]} == {
+        str(path): ["other_project"] for path in (foreign, interrupted)
+    }
+    for item in preview["protected"]:
+        (detail,) = item["details"]
+        assert detail["recorded_place"] == "../second/project/deck.toml"
+        assert detail["current_place"] == "../first/project/deck.toml"
+        assert item["reasons"] == [f"別の資料の実行（資料: {detail['recorded_project']}）"]
+        assert item["run_id"] == Path(item["run"]).name
+    assert runs.clean_runs(first, keep=0, apply=True)["removed"] == [str(own)]
+    assert foreign.is_dir() and interrupted.is_dir()
+
+
+@pytest.mark.parametrize("project_path", [None, "", [], 42])
+def test_clean_protects_runs_without_project_identity(tmp_path, project_path):
+    project = make_project(tmp_path)
+    run = make_run(project, "0001")
+    path = run / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["project"] = project_path
+    save(path, manifest)
+    result = runs.clean_runs(project, keep=0, apply=True)
+    assert result["removed"] == [] and run.is_dir()
+    (item,) = result["protected"]
+    assert (item["run"], item["reason_codes"]) == (str(run), ["unknown_project"])
+    assert item["reasons"] == ["現在の資料の実行と確認できない（記録に資料か実行保存先がない）"]
 
 
 def test_clean_keeps_protected_runs(tmp_path):
@@ -433,7 +531,9 @@ def test_old_text_marker_is_unknown_and_protected(tmp_path):
     assert (state["state"], state["reason"]) == ("unknown", LEGACY_REASON)
     result = runs.clean_runs(project, before="0002", failed=True, apply=True)
     assert result["candidates"] == [] and run.exists()
-    assert result["protected"] == [{"run": str(run), "reasons": [f"実行中か判定できない: {LEGACY_REASON}"]}]
+    assert [(item["run"], item["reasons"], item["reason_codes"]) for item in result["protected"]] == [
+        (str(run), [f"実行中か判定できない: {LEGACY_REASON}"], ["running_unknown"])
+    ]
 
 
 def test_other_host_is_unknown(tmp_path):

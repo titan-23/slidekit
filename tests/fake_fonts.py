@@ -34,10 +34,11 @@ class FakeFonts:
         math_descent: float = 0.1,
         math_line_ascent: float | None = None,
         math_line_descent: float | None = None,
-        math_boxes: Mapping[str, tuple[float, float, float, float, float]] | None = None,
+        math_boxes: Mapping[str, tuple[float, ...]] | None = None,
         roles: Mapping[str, str] | None = None,
     ):
-        """`math_boxes` は式から (幅, 上, 下, 行の上, 行の下) の em への辞書で、その式だけ値を替える。"""
+        """`math_boxes` は式から (幅, 上, 下, 行の上, 行の下) の em への辞書で、その式だけ値を替える。
+        7 つ目まで書くと、描画範囲の左右（式の左端からの em）も替える。"""
         if isinstance(missing, Mapping):
             self._missing = {family: frozenset(characters) for family, characters in missing.items()}
             self._missing_everywhere = frozenset()

@@ -245,6 +245,18 @@ def test_unknown_setting_names_name_file_key_and_candidates(kind, data, expected
         ),
         (
             "theme",
+            {"page_kinds": {"content": {"page_number_format": "{pages} / {total}"}}},
+            "theme.toml: page_kinds.content.page_number_format は {page} を含み、波括弧の欄が {page} と {total} だけの"
+            "文字列で指定してください（値: '{pages} / {total}'）",
+        ),
+        (
+            "theme",
+            {"page_kinds": {"content": {"page_number_format": "{page} / {count}"}}},
+            "theme.toml: page_kinds.content.page_number_format は {page} を含み、波括弧の欄が {page} と {total} だけの"
+            "文字列で指定してください（値: '{page} / {count}'）",
+        ),
+        (
+            "theme",
             {"page_kinds": {"content": {"title_style": {"align": "middle"}}}},
             "theme.toml: page_kinds.content.title_style.align は left、center、right、justify のどれかで指定してください（値: 'middle'）",
         ),
@@ -448,7 +460,7 @@ FULL_DECK = {
         "python": ["helper.py"],
         "bibliography": ["references.bib"],
         "asset_dirs": ["figures"],
-        "documents": [{"id": "outline", "path": "outline.md"}],
+        "documents": [{"id": "outline", "path": "outline.md", "affects_content": True}],
     },
     "render": {"primary": "powerpoint", "required": ["powerpoint", "libreoffice"]},
     "math": {"fallback": "required", "fallback_renderer": "powerpoint", "fallback_scale": 2.5, "functions": ["argmax"]},
@@ -901,3 +913,15 @@ def test_checks_do_not_change_their_input():
     before = copy.deepcopy(data)
     problems_of("theme", data)
     assert data == before
+
+
+def test_role_skip_checks_accept_only_warning_and_info_codes():
+    from slidekit.schema import check_settings
+
+    theme = {"roles": {"refs": {"skip_checks": ["math_not_marked", "text_overflow", "no_such_code"]}}}
+    messages = [str(problem) for problem in check_settings("theme", theme, file="theme.toml")]
+    assert any(
+        "roles.refs.skip_checks" in message and "text_overflow は指定できません" in message for message in messages
+    )
+    assert any("診断の識別子で指定してください" in message for message in messages)
+    assert not any("math_not_marked" in message for message in messages)

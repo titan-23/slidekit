@@ -306,11 +306,12 @@ def test_math_box_is_built_from_math_layout(synthetic, monkeypatch):
     box = synthetic.math_box(
         "x", 20, True, family="Test Math", display=True, japanese="Test Japanese", latin="Test Latin"
     )
-    assert box == MathBox(30.0, 24.0, 5.0, 26.0, 6.0)
+    assert box == MathBox(30.0, 24.0, 5.0, 26.0, 6.0, 0.5, 29.0)
     # 独立した数式の組み方と、\text を計測する文字の書体（既定はテーマの書体）を渡す。
     assert calls == [("x", 20.0, True, True, ("Test Japanese", "Test Latin"))] and families == ["Test Math"]
     # 基線より上か下にインクがない値は 0 にする。
-    assert synthetic.math_box("y", 20, latin="Other Latin") == MathBox(12.0, 0.0, 4.0, 0.0, 3.0)
+    # 描画範囲の左右はそのまま渡す（はみ出しの検査に使う）。
+    assert synthetic.math_box("y", 20, latin="Other Latin") == MathBox(12.0, 0.0, 4.0, 0.0, 3.0, 0.0, 12.0)
     assert calls[-1] == ("y", 20.0, False, False, ("Test Japanese", "Other Latin")) and families[-1] is None
 
 

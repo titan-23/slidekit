@@ -7,7 +7,15 @@ import uuid
 import pytest
 
 from slidekit.errors import failure_diagnostic
-from slidekit.report import count_issues, sort_issues, summarize
+from slidekit.report import count_issues, sort_issues
+from slidekit.report import summarize as full_summarize
+
+
+def summarize(*args, **kwargs) -> str:
+    """要約から最後の結果の行を除いた本体。最後の行が「結果: 」で始まることも確かめる（行の形は個別の試験で見る）。"""
+    body, _, last = full_summarize(*args, **kwargs).rpartition("\n")
+    assert last.startswith("結果: "), last
+    return body
 
 
 def issue(
@@ -941,7 +949,7 @@ def test_review_summaries_show_groups_warnings_and_next_steps(tmp_path, monkeypa
         "invalid_records": [],
         "next": [record, "slidekit review record --build out/runs/0012 --kind overview ..."],
     }
-    assert summarize("review status", status).splitlines() == [
+    assert summarize("review status", status, verbose=True).splitlines() == [
         "確認: 未完了（実行 0012、45 ページ、完全な生成）",
         "  エラー 0 件、警告 3 件（許容 1、宣言 1、未対応 1）",
         "  確認 91 件のうち 86 件が有効（引き継ぎ 78 件、ページ番号だけ変わったもの 2 件）",
@@ -956,6 +964,10 @@ def test_review_summaries_show_groups_warnings_and_next_steps(tmp_path, monkeypa
         f"  {record}",
         "  slidekit review record --build out/runs/0012 --kind overview ...",
     ]
+    # 既定では、宣言で許容した警告は件数だけを示す。最後の行は合否・残りの件数・終了コードである。
+    text = full_summarize("review status", status)
+    assert "  宣言で許容した警告: 1 件（一覧は --verbose）" in text.splitlines()
+    assert text.splitlines()[-1] == "結果: 未解決の事項あり（エラー 0、未完了の確認 5、未対応の警告 1、終了コード 1）"
     blocked = {
         **status,
         "status": "blocked",
@@ -1169,13 +1181,20 @@ def test_layout_and_build_summaries_mark_declared_warnings(tmp_path, monkeypatch
         "issues": [declared, plain, issue("text_wrap_near_limit", "info", number=5, element="note")],
         "exit_code": 0,
     }
-    lines = summarize("layout", layout).splitlines()
+    lines = summarize("layout", layout, verbose=True).splitlines()
     assert lines[0] == "配置の検査: 合格（エラー 0 件、警告 2 件、うち宣言で許容 1 件、参考 1 件）"
     assert lines[2:6] == [
         "警告と参考:",
         "  p.3 警告 text_padding_overlap body text_padding_overlap の文言",
         "  p.5 参考 text_wrap_near_limit note text_wrap_near_limit の文言",
         "  p.8 警告 element_overlap label / chart element_overlap の文言（宣言で許容）",
+    ]
+    # 既定では宣言で許容した警告を件数だけにし、新しい警告が埋もれないようにする。
+    assert summarize("layout", layout).splitlines()[2:6] == [
+        "警告と参考:",
+        "  p.3 警告 text_padding_overlap body text_padding_overlap の文言",
+        "  p.5 参考 text_wrap_near_limit note text_wrap_near_limit の文言",
+        "宣言で許容した警告 1 件（一覧は --verbose）",
     ]
     built = {
         "command": "build",
@@ -1292,3 +1311,64 @@ def test_command_failure_summary_lists_message_lines_and_location():
     assert summarize(
         "build", {"status": "failed", "exception": "KeyboardInterrupt", "message": "処理を中断しました"}
     ) == ("生成: 中断\n  処理を中断しました")
+
+
+def test_build_summary_explains_carry_sources_reasons_and_environment(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    carry = {
+        "status": "carried",
+        "count": 40,
+        "sources": {str(tmp_path / "out/runs/0133"): 38, str(tmp_path / "out/runs/0120"): 2},
+        "renumbered": ["a", "b"],
+        "renumbered_from": {"0133": 2},
+        "remaining": {"visual": 2, "overview": 1, "content": 3, "warnings": 0},
+        "pending_reasons": [
+            {"kind": "visual", "slide_id": "c", "reason": "表示環境の変更"},
+            {"kind": "visual", "slide_id": "d", "reason": "ページの表示の変更"},
+            {"kind": "content", "slide_id": "c", "reason": "本文の変更"},
+            {"kind": "content", "slide_id": "e", "reason": "元資料の変更", "documents": ["proofs"]},
+            {"kind": "content", "slide_id": "f", "reason": "元資料の変更", "documents": ["proofs"]},
+        ],
+        "compared_run": "0133",
+        "environment_changes": [{"item": "pypdfium2", "before": "5.13.0", "after": "5.14.0"}],
+    }
+    lines = summarize("build", {"status": "built", "stage": "complete", "carry": carry, "exit_code": 0}).splitlines()
+    assert (
+        "確認の引き継ぎ: 40 件（引き継ぎ元 0133 38 件、0120 2 件、ページ番号だけ変わったページ 2 件（実行 0133 と比較）、"
+        "未確認 表示 2、一覧画像 1、内容 3、警告 0）"
+    ) in lines
+    assert (
+        "  引き継がなかった理由: 表示: 表示環境の変更 1、ページの表示の変更 1。内容: 本文の変更 1、元資料の変更 2（proofs）"
+    ) in lines
+    assert "  表示環境の変更（実行 0133 から）: pypdfium2 5.13.0 → 5.14.0" in lines
+
+
+def test_review_status_groups_pending_pages_by_reason():
+    status = {
+        "status": "incomplete",
+        "exit_code": 1,
+        "reviews": [
+            {
+                "kind": "content",
+                "renderer": None,
+                "variant": None,
+                "required": 7,
+                "satisfied": 3,
+                "carried": 3,
+                "renumbered": 0,
+                "slides": "3,5-7",
+                "pending": [
+                    {"slide_id": "c", "number": 3, "reason": "本文の変更"},
+                    {"slide_id": "e", "number": 5, "reason": "本文の変更"},
+                    {"slide_id": "f", "number": 6, "reason": "元資料の変更", "documents": ["proofs"]},
+                    {"slide_id": "g", "number": 7, "reason": "元資料の変更", "documents": ["proofs"]},
+                ],
+            }
+        ],
+        "warnings": {"total": 0, "pending": []},
+        "next": [],
+    }
+    assert (
+        "    内容 3,5-7（4 ページ。本文の変更 p.3,5、元資料の変更 p.6-7（proofs））"
+        in summarize("review status", status).splitlines()
+    )

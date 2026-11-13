@@ -533,7 +533,7 @@ def test_commands_are_documented():
     rows = _rows(_section(text, "コマンドの一覧"))
     leaves = {"slidekit " + " ".join(names): child for names, child in _leaf_commands(cli.parser())}
     _compare(rows, leaves, "コマンドの一覧の行")
-    common = {"--json", "--quiet", "-h", "--help"}
+    common = {"--json", "--quiet", "--verbose", "-h", "--help"}
     for command, child in leaves.items():
         options = {option for action in child._actions for option in action.option_strings} - common
         row = "|".join(rows[command])
@@ -544,7 +544,7 @@ def test_commands_are_documented():
                 assert all(
                     str(choice) in row for choice in action.choices
                 ), f"{command} の {action.option_strings[0]} の値の一覧がない"
-    for option in ("--json", "--quiet", "--version"):
+    for option in ("--json", "--quiet", "--verbose", "--version"):
         assert re.search(re.escape(option) + r"(?![\w-])", text), f"{option} の説明が docs/usage.md にない"
 
 
@@ -747,10 +747,12 @@ def test_carry_table_matches_evidence():
     assert evidence.content_digest(page, project) != evidence.content_digest({**page, "notes": "別の説明"}, project)
     assert evidence.content_digest(page, project) != evidence.content_digest(cited, project)
     assert "notesSlide" in evidence._UNFOLLOWED["slide"]
-    # ページ番号は桁数が同じときだけ表示の確認を引き継ぐ（数字を 0 にして部品を比べる）。
-    assert (
-        row("桁数が同じ")[2].startswith("引き継ぐ") and row("桁数が変わる")[2] == "そのページだけやり直す"
+    # ページ番号は桁数が同じなら証拠が変わらない（数字を 0 にして部品を比べる）。桁数・書式・枠が変わっても、
+    # 番号の図形を除いた証拠と、番号の領域を除いた画像が一致すれば引き継ぐ。
+    assert row("桁数が同じ")[2].startswith("引き継ぐ") and row("桁数・書式・枠")[2].startswith(
+        "引き継ぐ（番号の図形を除いた"
     ), "ページ番号の行の表示の確認が実装と違う"
+    assert "body_hash" in _section(_text(USAGE), "確認と完成物の保存"), "番号の図形を除いた証拠の説明がない"
 
     def masked(number: int) -> bytes:
         shape = etree.fromstring(
@@ -786,13 +788,14 @@ def test_declared_warnings_are_listed_in_summaries():
         "reason": "図の上にラベルを重ねる",
         "location": "slides.py:12",
     }
-    lines = report._declared_lines([entry], 20)
-    assert lines[0].rstrip(":") in section, "要約の見出しの名前が文書と違う"
+    assert "`--verbose`" in section, "--verbose で一覧を出すことの説明がない"
     for command, result in (
         ("review status", {"status": "complete", "declared_warnings": [entry]}),
         ("check", {"status": "passed", "final": True, "declared_warnings": [entry]}),
     ):
-        assert lines[0] in report.summarize(command, result), f"{command} の要約に宣言で許容した警告が並ばない"
+        shown = report.summarize(command, result, verbose=True)
+        assert "宣言で許容した警告:" in shown and "図の上にラベルを重ねる" in shown, f"{command} の要約に並ばない"
+        assert "宣言で許容した警告: 1 件" in report.summarize(command, result), f"{command} の要約に件数がない"
     # layout・doctor・build の要約では、件数の内数と行の末尾の印で示す。
     assert (
         "「うち宣言で許容 N 件」" in section and "「（宣言で許容）」" in section
@@ -800,7 +803,9 @@ def test_declared_warnings_are_listed_in_summaries():
     issue = {key: entry[key] for key in ("code", "slide_id", "slide_number", "element_id", "related_element_id")}
     issue.update(severity="warning", message="要素の重なりを確認する必要がある", declared={"reason": entry["reason"]})
     shown = report.summarize(
-        "layout", {"status": "passed", "issues": [issue], "counts": {"error": 0, "warning": 1}, "exit_code": 0}
+        "layout",
+        {"status": "passed", "issues": [issue], "counts": {"error": 0, "warning": 1}, "exit_code": 0},
+        verbose=True,
     )
     assert "うち宣言で許容 1 件" in shown and shown.splitlines()[2].endswith("（宣言で許容）"), shown
 

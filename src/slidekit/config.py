@@ -20,6 +20,7 @@ import tomllib
 from . import schema
 from .files import file_hash
 from .layout import finite_number
+from .errors import InputError
 from .schema import Problem, SettingsError
 
 PACKAGE = Path(__file__).resolve().parent
@@ -590,86 +591,110 @@ def load_project(path) -> Project:
     if problems:
         raise SettingsError(problems)
 
-    # 2. パスの解決、参照範囲・出力先の確認と入力の追跡。
-    config.setdefault("schema_version", 1)
-    config.setdefault("entrypoint", "slides.py:build")
-    config["size"] = _size(config.get("size", "16:9"))
-    config["metadata"] = config.get("metadata", {})
-    entrypoint = config["entrypoint"]
-    inputs = merge(
-        {"read_roots": ["."], "python": [], "bibliography": [], "asset_dirs": [], "documents": []},
-        config.get("inputs", {}),
-    )
-    inputs["read_roots"] = roots
-    if not inputs["read_roots"] or any(not Path(p).is_dir() for p in inputs["read_roots"]):
-        raise ValueError("参照範囲には既存のディレクトリを指定してください")
-    config["inputs"] = inputs
-    output_dir = _local_path(config.get("output_dir", "out"), root)
-    config["output_dir"] = str(output_dir)
-    if output_dir.is_file() or output_dir == root or _within(root, output_dir):
-        raise ValueError("資料ディレクトリまたはその親を出力先にはできません")
-    deliverables = merge(
-        {
-            "pptx": "presentation.pptx",
-            "pdf": "presentation.pdf",
-            "notes": "speaker_notes.md",
-            "record": "deliverables.json",
-        },
-        config.get("deliverables", {}),
-    )
-    config["deliverables"] = {name: str(_local_path(value, root)) for name, value in deliverables.items()}
-    destinations = list(map(Path, config["deliverables"].values()))
-    if len(set(destinations)) != len(destinations) or any(_within(p, output_dir) or p.is_dir() for p in destinations):
-        raise ValueError("完成物の保存先同士、実行ディレクトリとの重複は指定できません")
-    if any(_within(a, b) or _within(b, a) for i, a in enumerate(destinations) for b in destinations[i + 1 :]):
-        raise ValueError("完成物の保存先に親子のパスを指定できません")
-    project = Project(path, root, config, theme, rules, {}, output_dir=output_dir)
-    for file in files:
-        if file in destinations or _within(file, output_dir):
-            raise ValueError("資料設定と保存先が重複しています")
-        project.input_files[str(file)] = file_hash(file)
-    config["render"] = merge({"primary": "powerpoint", "required": ["powerpoint"]}, config.get("render", {}))
-    config["math"] = merge(
-        {"fallback": "auto", "fallback_renderer": "powerpoint", "fallback_scale": 4, "functions": []},
-        config.get("math", {}),
-    )
-    config["images"] = merge({"raster_scale": 2, "vector": False}, config.get("images", {}))
-    for kind, source in (("theme", theme_source), ("rules", rules_source)):
-        _track_resource(project, _bundled(kind))
-        config[kind] = str(project.resolve_input(source)) if source else BUNDLED[kind][1]
-    # 入口のファイルは inputs.python に書かなくても追跡する。entrypoint の表記は残し（継承元に書いたものは絶対パス）、
-    # 構築は root を基準に解決する。
-    entry_file = str(project.resolve_input(entrypoint.rsplit(":", 1)[0]))
-    inputs["python"] = [str(project.resolve_input(value)) for value in inputs["python"]]
-    if entry_file not in inputs["python"]:
-        inputs["python"].insert(0, entry_file)
-    inputs["bibliography"] = [str(project.resolve_input(value)) for value in inputs["bibliography"]]
-    for directory in dict.fromkeys(file.parent for file in files):
-        if (directory / "brief.md").is_file():
-            project.brief_path = project.resolve_input(directory / "brief.md")
-            break
-    documents = []
-    for document in inputs["documents"]:
-        document = copy.deepcopy(document)
-        document["path"] = str(project.resolve_input(document["path"]))
-        documents.append(document)
-    inputs["documents"] = documents
-    asset_dirs = []
-    for value in inputs["asset_dirs"]:
-        asset_dir = _local_path(value, root)
-        if not asset_dir.is_dir() or not any(_within(asset_dir, base) for base in project.read_roots):
-            raise ValueError(f"素材のディレクトリが存在しないか参照範囲外です: {asset_dir}")
-        if (
-            _within(asset_dir, output_dir)
-            or _within(output_dir, asset_dir)
-            or any(_within(p, asset_dir) for p in destinations)
+    # 2 の誤り（入力ファイルがない、参照範囲外など）は、設定の場所を示す設定の誤りにする（トレースバックを出さない）。
+    where = {"key": ""}
+
+    def resolve(value, key):
+        where["key"] = key
+        result = project.resolve_input(value)
+        where["key"] = ""
+        return result
+
+    try:
+        # 2. パスの解決、参照範囲・出力先の確認と入力の追跡。
+        config.setdefault("schema_version", 1)
+        config.setdefault("entrypoint", "slides.py:build")
+        config["size"] = _size(config.get("size", "16:9"))
+        config["metadata"] = config.get("metadata", {})
+        entrypoint = config["entrypoint"]
+        inputs = merge(
+            {"read_roots": ["."], "python": [], "bibliography": [], "asset_dirs": [], "documents": []},
+            config.get("inputs", {}),
+        )
+        inputs["read_roots"] = roots
+        if not inputs["read_roots"] or any(not Path(p).is_dir() for p in inputs["read_roots"]):
+            raise ValueError("参照範囲には既存のディレクトリを指定してください")
+        config["inputs"] = inputs
+        output_dir = _local_path(config.get("output_dir", "out"), root)
+        config["output_dir"] = str(output_dir)
+        if output_dir.is_file() or output_dir == root or _within(root, output_dir):
+            raise ValueError("資料ディレクトリまたはその親を出力先にはできません")
+        deliverables = merge(
+            {
+                "pptx": "presentation.pptx",
+                "pdf": "presentation.pdf",
+                "notes": "speaker_notes.md",
+                "record": "deliverables.json",
+            },
+            config.get("deliverables", {}),
+        )
+        config["deliverables"] = {name: str(_local_path(value, root)) for name, value in deliverables.items()}
+        destinations = list(map(Path, config["deliverables"].values()))
+        if len(set(destinations)) != len(destinations) or any(
+            _within(p, output_dir) or p.is_dir() for p in destinations
         ):
-            raise ValueError("素材と出力先の範囲が重複しています")
-        asset_dirs.append(str(asset_dir))
-    inputs["asset_dirs"] = asset_dirs
-    _template(project)
-    if config.get("environment_override"):
-        config["environment_override"] = str(project.resolve_input(config["environment_override"]))
-    project.environment = _load_environment(project, environment, environment_paths)
+            raise ValueError("完成物の保存先同士、実行ディレクトリとの重複は指定できません")
+        if any(_within(a, b) or _within(b, a) for i, a in enumerate(destinations) for b in destinations[i + 1 :]):
+            raise ValueError("完成物の保存先に親子のパスを指定できません")
+        project = Project(path, root, config, theme, rules, {}, output_dir=output_dir)
+        for file in files:
+            if file in destinations or _within(file, output_dir):
+                raise ValueError("資料設定と保存先が重複しています")
+            project.input_files[str(file)] = file_hash(file)
+        config["render"] = merge({"primary": "powerpoint", "required": ["powerpoint"]}, config.get("render", {}))
+        config["math"] = merge(
+            {"fallback": "auto", "fallback_renderer": "powerpoint", "fallback_scale": 4, "functions": []},
+            config.get("math", {}),
+        )
+        config["images"] = merge({"raster_scale": 2, "vector": False}, config.get("images", {}))
+        for kind, source in (("theme", theme_source), ("rules", rules_source)):
+            _track_resource(project, _bundled(kind))
+            config[kind] = str(resolve(source, kind)) if source else BUNDLED[kind][1]
+        # 入口のファイルは inputs.python に書かなくても追跡する。entrypoint の表記は残し（継承元に書いたものは絶対パス）、
+        # 構築は root を基準に解決する。
+        entry_file = str(resolve(entrypoint.rsplit(":", 1)[0], "entrypoint"))
+        inputs["python"] = [str(resolve(value, "inputs.python")) for value in inputs["python"]]
+        if entry_file not in inputs["python"]:
+            inputs["python"].insert(0, entry_file)
+        inputs["bibliography"] = [str(resolve(value, "inputs.bibliography")) for value in inputs["bibliography"]]
+        for directory in dict.fromkeys(file.parent for file in files):
+            if (directory / "brief.md").is_file():
+                project.brief_path = project.resolve_input(directory / "brief.md")
+                break
+        documents = []
+        for document in inputs["documents"]:
+            document = copy.deepcopy(document)
+            tracked = set(project.input_files)
+            document["path"] = str(resolve(document["path"], f"inputs.documents の {document.get('id')}"))
+            if document.get("affects_content") is False and document["path"] not in tracked:
+                # ページの内容に影響しない参考の文書は、生成記録の照合と内容の証拠から外す（存在と参照範囲は確かめる）。
+                project.input_files.pop(document["path"], None)
+            documents.append(document)
+        inputs["documents"] = documents
+        asset_dirs = []
+        where["key"] = "inputs.asset_dirs"
+        for value in inputs["asset_dirs"]:
+            asset_dir = _local_path(value, root)
+            if not asset_dir.is_dir() or not any(_within(asset_dir, base) for base in project.read_roots):
+                raise ValueError(f"素材のディレクトリが存在しないか参照範囲外です: {asset_dir}")
+            if (
+                _within(asset_dir, output_dir)
+                or _within(output_dir, asset_dir)
+                or any(_within(p, asset_dir) for p in destinations)
+            ):
+                raise ValueError("素材と出力先の範囲が重複しています")
+            asset_dirs.append(str(asset_dir))
+        inputs["asset_dirs"] = asset_dirs
+        where["key"] = "template"
+        _template(project)
+        where["key"] = ""
+        if config.get("environment_override"):
+            config["environment_override"] = str(resolve(config["environment_override"], "environment_override"))
+        project.environment = _load_environment(project, environment, environment_paths)
+    except InputError:
+        raise
+    except (OSError, ValueError) as error:
+        message = f"の指すファイルを使えません（{error}）" if where["key"] else str(error)
+        raise SettingsError([Problem(_display(path, root), where["key"], message)]) from error
     config["extends"] = [str(file) for file in files[1:]]
     return project

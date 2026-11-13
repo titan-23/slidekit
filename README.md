@@ -25,6 +25,10 @@ uv pip install -r requirements-lock.txt
 uv pip install --no-deps -e .
 ```
 
+別のリポジトリの資料から使うときは、仮想環境を有効にするか、仮想環境の `bin/slidekit` を絶対パスで呼ぶ（例：`/path/to/slidekit/.venv/bin/slidekit build --project src/deck.toml`）。
+相対パスの `../slidekit/.venv/bin/python -m slidekit` で起動すると、Python が `sys.prefix` の警告を毎回 2 行出す。
+要約の「次の操作」のコマンドは、起動した方法（`slidekit`、絶対パス、`python -m slidekit`）に合わせて書かれるので、そのまま実行できる。
+
 ## 使用例を生成する
 
 | 使用例 | 内容 | 主な機能 |
@@ -83,6 +87,7 @@ def build(context):
 - [数式の書き方](docs/math.md)：記法と対応する命令
 - [資料を作成する手順](workflows/authoring.md)：AI または人が資料を作るときの作業規則
 - [検証記録](validation.md)・[未解決の問題](docs/issues.md)
+- [開発と資料作成の改善案](docs/improvements.md)
 
 PDF の読み取りと画像化には pypdfium2（PDFium）と pypdf を使う。依存関係とそのライセンスは [開発と依存関係](docs/usage.md#開発と依存関係) にある。
 

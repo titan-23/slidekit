@@ -1,5 +1,5 @@
 {
-  "created": "2026-10-20",
+  "created": "2026-10-24",
   "font": {
     "family": "Cambria Math",
     "file": "cambria.ttc",
@@ -42,35 +42,35 @@
       "mode": "inline"
     },
     {
-      "advance_pt": 37.502,
+      "advance_pt": 37.509,
       "expression": "3.14",
       "ink_pt": [
-        1.297,
-        36.672,
-        13.53,
-        0.22
+        1.304,
+        36.554,
+        13.54,
+        0.21
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 12.542,
+      "advance_pt": 12.549,
       "expression": "\\alpha",
       "ink_pt": [
-        0.872,
-        11.622,
-        9.53,
-        0.22
+        0.879,
+        11.629,
+        9.54,
+        0.21
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 13.022,
+      "advance_pt": 13.029,
       "expression": "\\Theta",
       "ink_pt": [
-        1.102,
-        11.977,
-        13.53,
-        0.22
+        1.109,
+        11.859,
+        13.54,
+        0.21
       ],
       "mode": "inline"
     },
@@ -80,8 +80,8 @@
       "ink_pt": [
         0.929,
         9.179,
-        9.56,
-        0.19
+        9.57,
+        0.18
       ],
       "mode": "inline"
     },
@@ -91,8 +91,8 @@
       "ink_pt": [
         0.879,
         12.754,
-        13.81,
-        4.19
+        13.82,
+        4.305
       ],
       "mode": "inline"
     },
@@ -102,41 +102,41 @@
       "ink_pt": [
         0.359,
         9.734,
-        13.935,
-        0.19
+        13.945,
+        0.18
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 46.629,
+      "advance_pt": 46.622,
       "expression": "a+b",
       "ink_pt": [
-        0.929,
-        45.304,
-        14.07,
-        0.555
+        0.922,
+        45.297,
+        14.09,
+        0.66
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 46.629,
+      "advance_pt": 46.622,
       "expression": "a-b",
       "ink_pt": [
-        0.879,
-        45.254,
-        14.07,
-        0.18
+        0.872,
+        45.247,
+        14.09,
+        0.16
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 26.589,
+      "advance_pt": 26.582,
       "expression": "-a",
       "ink_pt": [
-        1.359,
-        25.859,
-        9.57,
-        0.18
+        1.352,
+        25.852,
+        9.59,
+        0.16
       ],
       "mode": "inline"
     },
@@ -146,8 +146,8 @@
       "ink_pt": [
         0.929,
         44.429,
-        14.07,
-        0.18
+        14.02,
+        0.23
       ],
       "mode": "inline"
     },
@@ -157,8 +157,8 @@
       "ink_pt": [
         0.879,
         35.879,
-        14.07,
-        0.18
+        14.02,
+        0.23
       ],
       "mode": "inline"
     },
@@ -168,41 +168,41 @@
       "ink_pt": [
         0.984,
         47.484,
-        14.07,
-        0.18
+        14.02,
+        0.23
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 48.902,
+      "advance_pt": 48.909,
       "expression": "a\\le b",
       "ink_pt": [
-        0.922,
-        47.422,
-        14.08,
-        1.17
+        0.929,
+        47.429,
+        14.04,
+        1.085
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 50.582,
+      "advance_pt": 50.589,
       "expression": "a\\to b",
       "ink_pt": [
-        0.872,
-        49.247,
-        14.08,
-        0.17
+        0.879,
+        49.254,
+        14.04,
+        0.21
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 30.212,
+      "advance_pt": 30.219,
       "expression": "a,b",
       "ink_pt": [
-        0.977,
-        28.852,
-        14.08,
-        2.67
+        0.984,
+        28.859,
+        14.04,
+        2.71
       ],
       "mode": "inline"
     },
@@ -212,8 +212,8 @@
       "ink_pt": [
         0.929,
         29.929,
-        13.985,
-        2.765
+        14.07,
+        2.68
       ],
       "mode": "inline"
     },
@@ -223,8 +223,8 @@
       "ink_pt": [
         0.879,
         29.879,
-        13.985,
-        0.14
+        14.07,
+        0.18
       ],
       "mode": "inline"
     },
@@ -234,41 +234,41 @@
       "ink_pt": [
         0.234,
         15.859,
-        13.36,
-        0.14
+        13.445,
+        0.18
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 18.309,
+      "advance_pt": 18.302,
       "expression": "f'",
       "ink_pt": [
-        -0.071,
-        16.554,
-        14.997,
-        4.378
+        0.047,
+        16.547,
+        14.965,
+        4.41
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 23.469,
+      "advance_pt": 23.462,
       "expression": "f''",
       "ink_pt": [
-        0.004,
-        21.629,
-        14.997,
-        4.378
+        -0.003,
+        21.622,
+        14.965,
+        4.41
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 16.869,
+      "advance_pt": 16.862,
       "expression": "x_i",
       "ink_pt": [
-        0.234,
-        15.109,
-        9.622,
-        4.253
+        0.227,
+        15.102,
+        9.59,
+        4.285
       ],
       "mode": "inline"
     },
@@ -306,101 +306,101 @@
       "mode": "inline"
     },
     {
-      "advance_pt": 41.342,
+      "advance_pt": 41.349,
       "expression": "x^{n+1}",
       "ink_pt": [
-        0.172,
-        39.547,
-        16.53,
-        0.22
+        0.179,
+        39.554,
+        16.54,
+        0.21
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 31.382,
+      "advance_pt": 31.389,
       "expression": "e^{-x}",
       "ink_pt": [
-        0.872,
-        30.122,
-        14.655,
-        0.22
+        0.879,
+        30.129,
+        14.665,
+        0.21
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 37.412,
+      "advance_pt": 37.419,
       "expression": "T_{\\text{max}}",
       "ink_pt": [
-        0.602,
-        36.602,
-        13.405,
-        4.345
+        0.609,
+        36.609,
+        13.415,
+        4.335
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 9.429,
+      "advance_pt": 9.422,
       "expression": "\\frac{a}{b}",
       "ink_pt": [
-        -0.071,
-        9.429,
-        19.06,
-        10.19
+        0.047,
+        9.422,
+        19.07,
+        10.305
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 8.469,
+      "advance_pt": 8.462,
       "expression": "\\frac{1}{2}",
       "ink_pt": [
-        0.004,
-        8.504,
-        20.97,
-        10.155
+        -0.003,
+        8.497,
+        20.98,
+        10.145
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 50.619,
+      "advance_pt": 50.612,
       "expression": "\\frac{n(n+1)}{2}",
       "ink_pt": [
-        -0.016,
-        50.609,
-        22.095,
-        10.155
+        -0.023,
+        50.602,
+        22.105,
+        10.145
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 33.789,
+      "advance_pt": 33.782,
       "expression": "a/b",
       "ink_pt": [
-        0.929,
-        32.429,
-        14.945,
-        3.43
+        0.922,
+        32.422,
+        14.84,
+        3.41
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 27.669,
+      "advance_pt": 27.662,
       "expression": "\\binom{n}{k}",
       "ink_pt": [
-        1.629,
-        25.879,
-        17.94,
-        7.685
+        1.622,
+        25.872,
+        17.96,
+        7.79
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 24.909,
+      "advance_pt": 24.902,
       "expression": "\\sqrt{n}",
       "ink_pt": [
-        0.234,
-        24.859,
-        15.69,
-        3.685
+        0.227,
+        24.852,
+        15.71,
+        3.665
       ],
       "mode": "inline"
     },
@@ -410,8 +410,8 @@
       "ink_pt": [
         0.304,
         59.804,
-        15.07,
-        4.305
+        15.02,
+        4.355
       ],
       "mode": "inline"
     },
@@ -421,8 +421,8 @@
       "ink_pt": [
         2.254,
         26.504,
-        16.19,
-        3.685
+        16.14,
+        3.735
       ],
       "mode": "inline"
     },
@@ -432,52 +432,52 @@
       "ink_pt": [
         0.234,
         24.359,
-        28.035,
-        16.715
+        27.985,
+        16.765
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 27.662,
+      "advance_pt": 27.669,
       "expression": "(x)",
       "ink_pt": [
-        1.672,
-        26.047,
-        14.205,
-        4.42
+        1.679,
+        25.929,
+        14.165,
+        4.46
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 39.302,
+      "advance_pt": 39.309,
       "expression": "f(x)",
       "ink_pt": [
-        -0.003,
-        37.622,
-        14.205,
-        4.42
+        0.004,
+        37.629,
+        14.165,
+        4.46
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 42.332,
+      "advance_pt": 42.339,
       "expression": "O(n)",
       "ink_pt": [
-        1.227,
-        40.602,
-        14.205,
-        4.42
+        1.234,
+        40.609,
+        14.165,
+        4.46
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 55.389,
+      "advance_pt": 55.382,
       "expression": "O(\\sqrt{n})",
       "ink_pt": [
-        1.179,
-        53.804,
-        15.73,
-        4.395
+        1.172,
+        53.797,
+        15.69,
+        4.435
       ],
       "mode": "inline"
     },
@@ -487,52 +487,52 @@
       "ink_pt": [
         1.254,
         85.004,
-        14.11,
-        4.39
+        14.195,
+        4.43
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 29.019,
+      "advance_pt": 29.012,
       "expression": "\\left(\\frac{a}{b}\\right)",
       "ink_pt": [
-        1.609,
-        27.359,
-        22.33,
-        10.67
+        1.602,
+        27.352,
+        22.29,
+        10.71
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 45.669,
+      "advance_pt": 45.662,
       "expression": "[0,n)",
       "ink_pt": [
-        2.179,
-        43.929,
-        14.247,
-        4.503
+        2.172,
+        44.047,
+        14.215,
+        4.535
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 26.709,
+      "advance_pt": 26.702,
       "expression": "\\{x\\}",
       "ink_pt": [
-        0.879,
-        25.754,
-        14.247,
-        4.503
+        0.872,
+        25.747,
+        14.215,
+        4.535
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 23.949,
+      "advance_pt": 23.942,
       "expression": "|x|",
       "ink_pt": [
-        2.359,
-        21.609,
-        13.997,
-        4.253
+        2.352,
+        21.602,
+        14.09,
+        4.16
       ],
       "mode": "inline"
     },
@@ -570,35 +570,35 @@
       "mode": "inline"
     },
     {
-      "advance_pt": 40.982,
+      "advance_pt": 40.989,
       "expression": "\\log n",
       "ink_pt": [
-        0.547,
-        40.422,
-        14.03,
-        4.47
+        0.554,
+        40.429,
+        14.04,
+        4.46
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 54.182,
+      "advance_pt": 54.189,
       "expression": "\\log(n)",
       "ink_pt": [
-        0.497,
-        52.497,
-        14.155,
-        4.47
+        0.504,
+        52.504,
+        14.165,
+        4.46
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 51.092,
+      "advance_pt": 51.099,
       "expression": "\\log_2 n",
       "ink_pt": [
-        0.477,
-        50.602,
-        14.03,
-        4.47
+        0.484,
+        50.609,
+        14.04,
+        4.46
       ],
       "mode": "inline"
     },
@@ -608,8 +608,8 @@
       "ink_pt": [
         0.804,
         38.929,
-        13.185,
-        0.19
+        13.195,
+        0.18
       ],
       "mode": "inline"
     },
@@ -619,8 +619,8 @@
       "ink_pt": [
         0.754,
         81.004,
-        14.185,
-        4.44
+        14.195,
+        4.43
       ],
       "mode": "inline"
     },
@@ -630,41 +630,41 @@
       "ink_pt": [
         0.734,
         58.234,
-        13.185,
-        4.19
-      ],
-      "mode": "inline"
-    },
-    {
-      "advance_pt": 56.229,
-      "expression": "\\max\\limits_{i} x_i",
-      "ink_pt": [
-        0.679,
-        54.429,
-        9.565,
-        12.435
-      ],
-      "mode": "inline"
-    },
-    {
-      "advance_pt": 88.869,
-      "expression": "\\lim_{n\\to\\infty} a_n",
-      "ink_pt": [
-        0.504,
-        87.504,
-        14.07,
+        13.195,
         4.305
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 68.979,
+      "advance_pt": 56.222,
+      "expression": "\\max\\limits_{i} x_i",
+      "ink_pt": [
+        0.672,
+        54.422,
+        9.585,
+        12.415
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 88.862,
+      "expression": "\\lim_{n\\to\\infty} a_n",
+      "ink_pt": [
+        0.497,
+        87.622,
+        14.09,
+        4.285
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 68.972,
       "expression": "\\operatorname{rank}(A)",
       "ink_pt": [
-        0.734,
-        67.234,
-        14.195,
-        4.43
+        0.727,
+        67.352,
+        14.215,
+        4.41
       ],
       "mode": "inline"
     },
@@ -674,8 +674,8 @@
       "ink_pt": [
         0.179,
         58.054,
-        15.445,
-        5.055
+        15.52,
+        5.105
       ],
       "mode": "inline"
     },
@@ -685,8 +685,8 @@
       "ink_pt": [
         0.129,
         58.129,
-        15.445,
-        5.055
+        15.52,
+        5.105
       ],
       "mode": "inline"
     },
@@ -696,41 +696,41 @@
       "ink_pt": [
         0.859,
         40.359,
-        14.945,
-        5.055
+        14.895,
+        5.105
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 89.122,
+      "advance_pt": 89.129,
       "expression": "\\int_0^1 f(x)\\,dx",
       "ink_pt": [
-        0.922,
-        88.297,
-        21.285,
-        8.34
+        0.929,
+        88.304,
+        21.245,
+        8.38
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 40.502,
+      "advance_pt": 40.509,
       "expression": "\\bigcup_i S_i",
       "ink_pt": [
-        2.122,
-        38.747,
-        13.58,
-        5.045
+        2.129,
+        38.754,
+        13.54,
+        5.085
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 11.222,
+      "advance_pt": 11.229,
       "expression": "\\hat{x}",
       "ink_pt": [
-        0.227,
-        10.477,
-        14.205,
-        0.17
+        0.234,
+        10.484,
+        14.165,
+        0.21
       ],
       "mode": "inline"
     },
@@ -740,8 +740,8 @@
       "ink_pt": [
         0.179,
         10.429,
-        13.36,
-        0.14
+        13.445,
+        0.18
       ],
       "mode": "inline"
     },
@@ -751,8 +751,8 @@
       "ink_pt": [
         0.004,
         11.254,
-        14.235,
-        0.14
+        14.195,
+        0.18
       ],
       "mode": "inline"
     },
@@ -762,41 +762,41 @@
       "ink_pt": [
         -0.016,
         22.109,
-        14.235,
-        4.265
+        14.195,
+        4.305
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 11.469,
+      "advance_pt": 11.462,
       "expression": "\\vec{v}",
       "ink_pt": [
-        0.679,
-        10.679,
-        15.747,
-        0.253
+        0.672,
+        10.672,
+        15.84,
+        0.16
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 11.229,
+      "advance_pt": 11.222,
       "expression": "\\dot{x}",
       "ink_pt": [
-        0.254,
-        10.379,
-        13.622,
-        0.253
+        0.247,
+        10.372,
+        13.715,
+        0.16
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 22.149,
+      "advance_pt": 22.142,
       "expression": "\\widehat{xy}",
       "ink_pt": [
-        0.234,
-        21.609,
-        14.247,
-        4.253
+        0.227,
+        21.602,
+        14.215,
+        4.285
       ],
       "mode": "inline"
     },
@@ -834,35 +834,35 @@
       "mode": "inline"
     },
     {
-      "advance_pt": 13.862,
+      "advance_pt": 13.869,
       "expression": "\\mathcal{O}",
       "ink_pt": [
-        0.922,
-        12.297,
-        13.53,
-        0.22
+        0.929,
+        12.304,
+        13.54,
+        0.21
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 14.822,
+      "advance_pt": 14.829,
       "expression": "\\mathbb{R}",
       "ink_pt": [
-        1.122,
-        14.872,
-        13.405,
-        0.095
+        1.129,
+        14.879,
+        13.415,
+        0.085
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 9.902,
+      "advance_pt": 9.909,
       "expression": "\\mathfrak{g}",
       "ink_pt": [
-        0.977,
-        8.977,
-        9.78,
-        3.72
+        0.984,
+        8.984,
+        9.79,
+        3.71
       ],
       "mode": "inline"
     },
@@ -872,8 +872,8 @@
       "ink_pt": [
         0.054,
         11.179,
-        13.435,
-        0.065
+        13.445,
+        0.055
       ],
       "mode": "inline"
     },
@@ -883,8 +883,8 @@
       "ink_pt": [
         0.004,
         12.004,
-        13.435,
-        0.065
+        13.445,
+        0.055
       ],
       "mode": "inline"
     },
@@ -894,41 +894,41 @@
       "ink_pt": [
         0.609,
         32.109,
-        14.435,
-        0.315
+        14.445,
+        0.305
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 39.909,
+      "advance_pt": 39.902,
       "expression": "\\text{最大}",
       "ink_pt": [
-        0.929,
-        38.929,
-        16.445,
-        1.555
+        0.922,
+        38.922,
+        16.465,
+        1.535
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 36.069,
+      "advance_pt": 36.062,
       "expression": "x\\text{ 個}",
       "ink_pt": [
-        0.254,
-        34.254,
-        16.695,
-        1.43
+        0.247,
+        34.372,
+        16.715,
+        1.41
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 26.109,
+      "advance_pt": 26.102,
       "expression": "a\\,b",
       "ink_pt": [
-        0.984,
-        24.734,
-        14.07,
-        0.18
+        0.977,
+        24.727,
+        14.09,
+        0.16
       ],
       "mode": "inline"
     },
@@ -938,8 +938,8 @@
       "ink_pt": [
         0.929,
         25.804,
-        14.07,
-        0.18
+        14.02,
+        0.23
       ],
       "mode": "inline"
     },
@@ -949,8 +949,8 @@
       "ink_pt": [
         0.879,
         26.504,
-        14.07,
-        0.18
+        14.02,
+        0.23
       ],
       "mode": "inline"
     },
@@ -960,41 +960,41 @@
       "ink_pt": [
         0.984,
         41.484,
-        14.09,
-        0.16
+        14.04,
+        0.21
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 62.726,
+      "advance_pt": 62.733,
       "expression": "a\\qquad b",
       "ink_pt": [
-        0.922,
-        61.547,
-        14.1,
-        0.15
+        0.929,
+        61.429,
+        14.06,
+        0.19
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 27.182,
+      "advance_pt": 27.189,
       "expression": "a\\ b",
       "ink_pt": [
-        0.872,
-        25.872,
-        14.08,
-        0.17
+        0.879,
+        25.879,
+        14.04,
+        0.21
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 12.662,
+      "advance_pt": 12.669,
       "expression": "\\not\\in",
       "ink_pt": [
-        1.352,
-        11.352,
-        13.33,
-        1.795
+        1.359,
+        11.359,
+        13.29,
+        1.71
       ],
       "mode": "inline"
     },
@@ -1004,8 +1004,8 @@
       "ink_pt": [
         0.179,
         45.054,
-        13.61,
-        0.265
+        13.57,
+        0.18
       ],
       "mode": "inline"
     },
@@ -1015,52 +1015,52 @@
       "ink_pt": [
         0.004,
         50.879,
-        13.61,
-        0.015
+        13.57,
+        0.055
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 14.949,
+      "advance_pt": 14.942,
       "expression": "\\overset{?}{=}",
       "ink_pt": [
-        1.359,
-        13.484,
-        23.38,
-        -3.005
+        1.352,
+        13.477,
+        23.34,
+        -2.965
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 17.109,
+      "advance_pt": 17.102,
       "expression": "\\cdots",
       "ink_pt": [
-        1.429,
-        15.679,
-        6.997,
-        -4.372
+        1.422,
+        15.672,
+        7.09,
+        -4.465
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 14.949,
+      "advance_pt": 14.942,
       "expression": "\\ldots",
       "ink_pt": [
-        2.379,
-        14.004,
         2.372,
-        0.003
+        13.997,
+        2.34,
+        0.035
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 70.179,
+      "advance_pt": 70.172,
       "expression": "a \\bmod b",
       "ink_pt": [
-        0.984,
-        68.859,
-        13.997,
-        0.253
+        0.977,
+        68.852,
+        14.09,
+        0.16
       ],
       "mode": "inline"
     },
@@ -1098,46 +1098,46 @@
       "mode": "inline"
     },
     {
-      "advance_pt": 30.182,
+      "advance_pt": 30.189,
       "expression": "p.q",
       "ink_pt": [
-        0.172,
-        28.672,
-        9.53,
-        4.22
+        0.179,
+        28.679,
+        9.54,
+        4.21
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 40.622,
+      "advance_pt": 40.629,
       "expression": "x_{\\text{最大}}",
       "ink_pt": [
-        0.247,
-        39.122,
-        9.51,
-        5.49
+        0.254,
+        39.129,
+        9.52,
+        5.605
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 57.212,
+      "advance_pt": 57.219,
       "expression": "\\sum_i a_i b_i",
       "ink_pt": [
-        0.102,
-        55.602,
-        14.905,
-        5.095
+        0.109,
+        55.609,
+        14.915,
+        5.085
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 52.869,
+      "advance_pt": 52.862,
       "expression": "\\int f\\,dx",
       "ink_pt": [
-        0.929,
-        51.929,
-        16.69,
-        5.06
+        0.922,
+        52.047,
+        16.7,
+        5.175
       ],
       "mode": "inline"
     },
@@ -1147,8 +1147,8 @@
       "ink_pt": [
         0.129,
         43.129,
-        14.935,
-        4.19
+        14.945,
+        4.305
       ],
       "mode": "inline"
     },
@@ -1157,31 +1157,31 @@
       "expression": "\\prod_{i=1}^{n} x_i",
       "ink_pt": [
         0.859,
-        59.359,
-        15.56,
-        5.065
+        59.484,
+        15.445,
+        5.055
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 32.349,
+      "advance_pt": 32.342,
       "expression": "\\oint_C f",
       "ink_pt": [
-        0.929,
-        31.554,
-        16.7,
-        8.3
+        0.922,
+        31.547,
+        16.72,
+        8.405
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 38.949,
+      "advance_pt": 38.942,
       "expression": "\\left(x^2\\right)",
       "ink_pt": [
-        1.629,
-        37.254,
-        17.96,
-        6.29
+        1.622,
+        37.247,
+        17.98,
+        6.27
       ],
       "mode": "inline"
     },
@@ -1191,8 +1191,8 @@
       "ink_pt": [
         1.484,
         35.234,
-        25.61,
-        14.015
+        25.65,
+        13.975
       ],
       "mode": "inline"
     },
@@ -1202,8 +1202,8 @@
       "ink_pt": [
         1.679,
         33.179,
-        19.07,
-        10.305
+        19.145,
+        10.23
       ],
       "mode": "inline"
     },
@@ -1213,8 +1213,8 @@
       "ink_pt": [
         0.004,
         16.629,
-        23.775,
-        10.225
+        23.85,
+        10.275
       ],
       "mode": "inline"
     },
@@ -1224,41 +1224,41 @@
       "ink_pt": [
         1.609,
         36.359,
-        27.0,
-        10.75
+        27.075,
+        10.8
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 50.102,
+      "advance_pt": 50.109,
       "expression": "(\\sqrt{x})^2",
       "ink_pt": [
-        1.672,
-        48.047,
-        16.575,
-        4.425
+        1.679,
+        48.054,
+        16.66,
+        4.465
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 69.542,
+      "advance_pt": 69.549,
       "expression": "(a+b)_i",
       "ink_pt": [
-        1.622,
-        67.872,
-        14.205,
-        4.42
+        1.629,
+        67.879,
+        14.165,
+        4.46
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 77.852,
+      "advance_pt": 77.859,
       "expression": "\\max\\{1,2\\}",
       "ink_pt": [
-        0.727,
-        76.977,
-        14.205,
-        4.545
+        0.734,
+        76.984,
+        14.165,
+        4.46
       ],
       "mode": "inline"
     },
@@ -1268,8 +1268,8 @@
       "ink_pt": [
         0.679,
         113.554,
-        14.235,
-        4.515
+        14.195,
+        4.555
       ],
       "mode": "inline"
     },
@@ -1279,8 +1279,8 @@
       "ink_pt": [
         1.629,
         41.129,
-        14.11,
-        4.39
+        14.195,
+        4.43
       ],
       "mode": "inline"
     },
@@ -1290,41 +1290,41 @@
       "ink_pt": [
         -0.016,
         52.734,
-        14.11,
-        4.39
+        14.195,
+        4.43
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 47.949,
+      "advance_pt": 47.942,
       "expression": "\\mathbf{(0,0)}",
       "ink_pt": [
-        1.679,
-        46.304,
-        14.122,
-        4.503
+        1.672,
+        46.297,
+        14.215,
+        4.41
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 24.309,
+      "advance_pt": 24.302,
       "expression": "\\text{/}\\bot",
       "ink_pt": [
-        0.004,
-        23.129,
-        14.622,
-        0.253
+        -0.003,
+        23.122,
+        14.59,
+        0.285
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 47.139,
+      "advance_pt": 47.132,
       "expression": "x\\bot y",
       "ink_pt": [
-        0.234,
-        46.484,
-        12.497,
-        4.253
+        0.227,
+        46.477,
+        12.59,
+        4.285
       ],
       "mode": "inline"
     },
@@ -1362,46 +1362,46 @@
       "mode": "inline"
     },
     {
-      "advance_pt": 68.486,
+      "advance_pt": 68.493,
       "expression": "\\log(x)y",
       "ink_pt": [
-        0.547,
-        67.797,
-        14.155,
-        4.47
+        0.554,
+        67.804,
+        14.165,
+        4.46
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 99.302,
+      "advance_pt": 99.309,
       "expression": "\\max(a,b)\\,c",
       "ink_pt": [
-        0.747,
-        98.247,
-        14.155,
-        4.47
+        0.754,
+        98.254,
+        14.165,
+        4.46
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 71.852,
+      "advance_pt": 71.859,
       "expression": "\\log x(y)",
       "ink_pt": [
-        0.477,
-        70.227,
-        14.155,
-        4.47
+        0.484,
+        70.234,
+        14.165,
+        4.46
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 53.229,
+      "advance_pt": 53.222,
       "expression": "\\log x\\frac{a}{b}",
       "ink_pt": [
-        0.554,
-        53.179,
-        19.06,
-        10.19
+        0.547,
+        53.172,
+        19.07,
+        10.305
       ],
       "mode": "inline"
     },
@@ -1411,52 +1411,52 @@
       "ink_pt": [
         0.504,
         82.629,
-        14.935,
-        5.065
+        14.945,
+        5.055
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 92.259,
+      "advance_pt": 92.252,
       "expression": "\\sqrt{x\\log x},y",
       "ink_pt": [
-        0.234,
-        91.609,
-        18.63,
-        6.37
+        0.227,
+        91.602,
+        18.64,
+        6.36
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 48.429,
+      "advance_pt": 48.422,
       "expression": "x a/b",
       "ink_pt": [
-        0.179,
-        46.929,
-        14.945,
-        3.43
+        0.172,
+        46.922,
+        14.84,
+        3.41
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 48.309,
+      "advance_pt": 48.302,
       "expression": "2a/b",
       "ink_pt": [
-        1.129,
-        46.879,
-        14.945,
-        3.43
+        1.122,
+        46.872,
+        14.84,
+        3.41
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 55.899,
+      "advance_pt": 55.892,
       "expression": "a/b,x",
       "ink_pt": [
-        0.984,
-        54.984,
-        14.945,
-        3.43
+        0.977,
+        54.977,
+        14.84,
+        3.41
       ],
       "mode": "inline"
     },
@@ -1466,8 +1466,8 @@
       "ink_pt": [
         0.179,
         67.554,
-        14.945,
-        3.43
+        14.895,
+        3.355
       ],
       "mode": "inline"
     },
@@ -1477,8 +1477,8 @@
       "ink_pt": [
         0.254,
         60.004,
-        14.945,
-        4.43
+        14.895,
+        4.48
       ],
       "mode": "inline"
     },
@@ -1488,41 +1488,41 @@
       "ink_pt": [
         0.984,
         47.609,
-        14.945,
-        3.43
+        14.895,
+        3.355
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 64.886,
+      "advance_pt": 64.893,
       "expression": "a/b(x)",
       "ink_pt": [
-        0.922,
-        63.172,
-        14.955,
-        4.42
+        0.929,
+        63.179,
+        14.915,
+        4.46
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 64.862,
+      "advance_pt": 64.869,
       "expression": "(x)a/b",
       "ink_pt": [
-        1.622,
-        63.497,
-        14.955,
-        4.42
+        1.629,
+        63.504,
+        14.915,
+        4.46
       ],
       "mode": "inline"
     },
     {
-      "advance_pt": 58.772,
+      "advance_pt": 58.779,
       "expression": "x\\underset{i}{\\max} y",
       "ink_pt": [
-        0.227,
-        58.227,
-        9.575,
-        12.425
+        0.234,
+        58.234,
+        9.535,
+        12.465
       ],
       "mode": "inline"
     },
@@ -1532,8 +1532,8 @@
       "ink_pt": [
         0.929,
         36.429,
-        14.36,
-        0.265
+        14.445,
+        0.305
       ],
       "mode": "inline"
     },
@@ -1543,8 +1543,294 @@
       "ink_pt": [
         0.629,
         35.129,
-        14.36,
-        0.265
+        14.445,
+        0.305
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 33.099,
+      "expression": "\\left(\\frac{\\frac{a}{b}}{c}\\right)",
+      "ink_pt": [
+        1.484,
+        31.359,
+        31.32,
+        19.68
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 31.149,
+      "expression": "\\left(\\frac{a}{\\frac{b}{c}}\\right)",
+      "ink_pt": [
+        1.554,
+        29.554,
+        19.17,
+        20.83
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 10.029,
+      "expression": "\\frac{\\frac{a}{b}}{c}",
+      "ink_pt": [
+        0.004,
+        10.004,
+        29.93,
+        10.195
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 11.469,
+      "expression": "\\frac{a}{\\frac{b}{c}}",
+      "ink_pt": [
+        -0.016,
+        11.359,
+        19.17,
+        20.83
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 47.349,
+      "expression": "\\left(\\sqrt{\\frac{a}{b}}\\right)",
+      "ink_pt": [
+        1.554,
+        45.804,
+        31.25,
+        19.75
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 76.389,
+      "expression": "\\left(\\sum_{i=1}^{n} a_i\\right)",
+      "ink_pt": [
+        1.629,
+        74.629,
+        15.52,
+        5.105
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 76.419,
+      "expression": "\\left(\\sum\\limits_{i=1}^{n} a_i\\right)",
+      "ink_pt": [
+        1.609,
+        74.609,
+        15.52,
+        5.105
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 33.429,
+      "expression": "\\left(x_i\\right)",
+      "ink_pt": [
+        1.679,
+        31.804,
+        15.04,
+        4.21
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 29.349,
+      "expression": "\\left(\\frac{x}{y}\\right)",
+      "ink_pt": [
+        1.504,
+        27.754,
+        25.58,
+        14.045
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 37.299,
+      "expression": "\\left(\\frac{x}{y^2}\\right)",
+      "ink_pt": [
+        1.484,
+        35.609,
+        25.58,
+        14.045
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 25.389,
+      "expression": "\\left[\\frac{\\frac{a}{b}}{c}\\right]",
+      "ink_pt": [
+        2.179,
+        23.179,
+        31.085,
+        19.54
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 44.349,
+      "expression": "\\left\\{\\sqrt{\\frac{a}{b}}\\right\\}",
+      "ink_pt": [
+        0.879,
+        43.379,
+        31.205,
+        19.545
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 24.302,
+      "expression": "\\left|\\frac{a}{\\frac{b}{c}}\\right|",
+      "ink_pt": [
+        2.227,
+        21.852,
+        19.13,
+        20.87
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 15.669,
+      "expression": "\\frac{\\frac{2\\text{b}}{3}}{4}",
+      "ink_pt": [
+        -0.071,
+        15.679,
+        32.35,
+        10.15
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 20.589,
+      "expression": "x^{\\frac{a}{b}}",
+      "ink_pt": [
+        0.254,
+        19.879,
+        24.455,
+        0.17
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 42.932,
+      "expression": "m^{1/4}",
+      "ink_pt": [
+        0.227,
+        41.477,
+        18.165,
+        0.21
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 48.189,
+      "expression": "2^{\\lceil a/2\\rceil}",
+      "ink_pt": [
+        1.179,
+        45.804,
+        18.22,
+        0.03
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 48.069,
+      "expression": "\\left(x^{y^z}\\right)",
+      "ink_pt": [
+        1.629,
+        46.379,
+        18.755,
+        6.37
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 45.099,
+      "expression": "\\left(x_{y_z}\\right)",
+      "ink_pt": [
+        1.609,
+        43.234,
+        17.89,
+        7.11
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 36.429,
+      "expression": "\\left(\\frac{a}{b^2}\\right)",
+      "ink_pt": [
+        1.679,
+        34.804,
+        22.26,
+        10.74
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 36.909,
+      "expression": "\\left(\\frac{a^2}{b^2}\\right)",
+      "ink_pt": [
+        1.504,
+        35.254,
+        25.58,
+        14.045
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 33.092,
+      "expression": "\\left(\\frac{\\frac{a}{b}}{\\frac{c}{d}}\\right)",
+      "ink_pt": [
+        1.477,
+        31.352,
+        31.27,
+        19.73
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 30.182,
+      "expression": "\\left(\\frac{\\frac{1}{2}}{3}\\right)",
+      "ink_pt": [
+        1.547,
+        28.672,
+        30.735,
+        10.265
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 30.182,
+      "expression": "\\left(\\frac{1}{\\frac{2}{3}}\\right)",
+      "ink_pt": [
+        1.497,
+        28.622,
+        21.045,
+        19.58
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 48.812,
+      "expression": "\\left(\\frac{a+b}{c}\\right)",
+      "ink_pt": [
+        1.602,
+        47.102,
+        22.29,
+        10.71
+      ],
+      "mode": "inline"
+    },
+    {
+      "advance_pt": 38.829,
+      "expression": "\\left(\\frac{\\sqrt{a}}{b}\\right)",
+      "ink_pt": [
+        1.554,
+        37.304,
+        25.65,
+        13.975
       ],
       "mode": "inline"
     },
@@ -1592,7 +1878,7 @@
     },
     {
       "expression": "\\phi",
-      "ink_height_pt": 18.0,
+      "ink_height_pt": 18.125,
       "ink_width_pt": 11.75,
       "mode": "display"
     },
@@ -1604,7 +1890,7 @@
     },
     {
       "expression": "a+b",
-      "ink_height_pt": 14.625,
+      "ink_height_pt": 14.75,
       "ink_width_pt": 44.375,
       "mode": "display"
     },
@@ -1622,19 +1908,19 @@
     },
     {
       "expression": "a\\times b",
-      "ink_height_pt": 14.125,
+      "ink_height_pt": 14.25,
       "ink_width_pt": 43.625,
       "mode": "display"
     },
     {
       "expression": "a\\cdot b",
-      "ink_height_pt": 14.125,
+      "ink_height_pt": 14.25,
       "ink_width_pt": 35.0,
       "mode": "display"
     },
     {
       "expression": "a=b",
-      "ink_height_pt": 14.125,
+      "ink_height_pt": 14.25,
       "ink_width_pt": 46.625,
       "mode": "display"
     },
@@ -1688,19 +1974,19 @@
     },
     {
       "expression": "x_i",
-      "ink_height_pt": 13.75,
+      "ink_height_pt": 13.875,
       "ink_width_pt": 14.875,
       "mode": "display"
     },
     {
       "expression": "x^2",
-      "ink_height_pt": 16.75,
+      "ink_height_pt": 16.875,
       "ink_width_pt": 18.75,
       "mode": "display"
     },
     {
       "expression": "x_i^2",
-      "ink_height_pt": 22.5,
+      "ink_height_pt": 22.375,
       "ink_width_pt": 18.625,
       "mode": "display"
     },
@@ -1724,25 +2010,25 @@
     },
     {
       "expression": "T_{\\text{max}}",
-      "ink_height_pt": 17.625,
+      "ink_height_pt": 17.75,
       "ink_width_pt": 36.0,
       "mode": "display"
     },
     {
       "expression": "\\frac{a}{b}",
-      "ink_height_pt": 38.375,
+      "ink_height_pt": 38.25,
       "ink_width_pt": 11.75,
       "mode": "display"
     },
     {
       "expression": "\\frac{1}{2}",
-      "ink_height_pt": 42.125,
+      "ink_height_pt": 42.25,
       "ink_width_pt": 11.25,
       "mode": "display"
     },
     {
       "expression": "\\frac{n(n+1)}{2}",
-      "ink_height_pt": 42.875,
+      "ink_height_pt": 42.75,
       "ink_width_pt": 75.25,
       "mode": "display"
     },
@@ -1838,7 +2124,7 @@
     },
     {
       "expression": "\\lfloor x\\rfloor",
-      "ink_height_pt": 18.375,
+      "ink_height_pt": 18.25,
       "ink_width_pt": 20.875,
       "mode": "display"
     },
@@ -1850,13 +2136,13 @@
     },
     {
       "expression": "\\langle u,v\\rangle",
-      "ink_height_pt": 18.375,
+      "ink_height_pt": 18.25,
       "ink_width_pt": 43.0,
       "mode": "display"
     },
     {
       "expression": "\\log n",
-      "ink_height_pt": 18.375,
+      "ink_height_pt": 18.5,
       "ink_width_pt": 39.75,
       "mode": "display"
     },
@@ -1868,13 +2154,13 @@
     },
     {
       "expression": "\\log_2 n",
-      "ink_height_pt": 18.375,
+      "ink_height_pt": 18.5,
       "ink_width_pt": 50.125,
       "mode": "display"
     },
     {
       "expression": "\\sin x",
-      "ink_height_pt": 13.5,
+      "ink_height_pt": 13.375,
       "ink_width_pt": 38.125,
       "mode": "display"
     },
@@ -1898,7 +2184,7 @@
     },
     {
       "expression": "\\lim_{n\\to\\infty} a_n",
-      "ink_height_pt": 18.25,
+      "ink_height_pt": 18.375,
       "ink_width_pt": 87.0,
       "mode": "display"
     },
@@ -1910,14 +2196,14 @@
     },
     {
       "expression": "\\sum_{i=1}^{n} a_i",
-      "ink_height_pt": 44.375,
+      "ink_height_pt": 44.25,
       "ink_width_pt": 66.875,
       "mode": "display"
     },
     {
       "expression": "\\sum\\limits_{i=1}^{n} a_i",
-      "ink_height_pt": 62.875,
-      "ink_width_pt": 45.625,
+      "ink_height_pt": 62.75,
+      "ink_width_pt": 45.5,
       "mode": "display"
     },
     {
@@ -1928,7 +2214,7 @@
     },
     {
       "expression": "\\int_0^1 f(x)\\,dx",
-      "ink_height_pt": 51.125,
+      "ink_height_pt": 51.0,
       "ink_width_pt": 88.375,
       "mode": "display"
     },
@@ -1940,13 +2226,13 @@
     },
     {
       "expression": "\\hat{x}",
-      "ink_height_pt": 14.25,
+      "ink_height_pt": 14.375,
       "ink_width_pt": 10.25,
       "mode": "display"
     },
     {
       "expression": "\\tilde{x}",
-      "ink_height_pt": 13.5,
+      "ink_height_pt": 13.625,
       "ink_width_pt": 10.25,
       "mode": "display"
     },
@@ -2036,13 +2322,13 @@
     },
     {
       "expression": "\\text{最大}",
-      "ink_height_pt": 17.875,
+      "ink_height_pt": 18.0,
       "ink_width_pt": 38.0,
       "mode": "display"
     },
     {
       "expression": "x\\text{ 個}",
-      "ink_height_pt": 18.0,
+      "ink_height_pt": 18.125,
       "ink_width_pt": 34.0,
       "mode": "display"
     },
@@ -2054,13 +2340,13 @@
     },
     {
       "expression": "a\\:b",
-      "ink_height_pt": 14.125,
+      "ink_height_pt": 14.25,
       "ink_width_pt": 24.875,
       "mode": "display"
     },
     {
       "expression": "a\\;b",
-      "ink_height_pt": 14.125,
+      "ink_height_pt": 14.25,
       "ink_width_pt": 25.5,
       "mode": "display"
     },
@@ -2096,13 +2382,13 @@
     },
     {
       "expression": "A\\subseteq B",
-      "ink_height_pt": 13.5,
+      "ink_height_pt": 13.625,
       "ink_width_pt": 51.125,
       "mode": "display"
     },
     {
       "expression": "\\overset{?}{=}",
-      "ink_height_pt": 20.25,
+      "ink_height_pt": 20.375,
       "ink_width_pt": 12.125,
       "mode": "display"
     },
@@ -2144,7 +2430,7 @@
     },
     {
       "expression": "p.q",
-      "ink_height_pt": 13.875,
+      "ink_height_pt": 13.75,
       "ink_width_pt": 28.5,
       "mode": "display"
     },
@@ -2162,7 +2448,7 @@
     },
     {
       "expression": "\\int f\\,dx",
-      "ink_height_pt": 43.25,
+      "ink_height_pt": 43.125,
       "ink_width_pt": 52.125,
       "mode": "display"
     },
@@ -2192,7 +2478,7 @@
     },
     {
       "expression": "\\left(\\frac{a^2}{b}\\right)",
-      "ink_height_pt": 51.375,
+      "ink_height_pt": 51.5,
       "ink_width_pt": 40.75,
       "mode": "display"
     },
@@ -2228,7 +2514,7 @@
     },
     {
       "expression": "\\max\\{1,2\\}",
-      "ink_height_pt": 18.75,
+      "ink_height_pt": 18.625,
       "ink_width_pt": 76.125,
       "mode": "display"
     },
@@ -2264,8 +2550,8 @@
     },
     {
       "expression": "x\\bot y",
-      "ink_height_pt": 16.75,
-      "ink_width_pt": 46.25,
+      "ink_height_pt": 16.875,
+      "ink_width_pt": 46.375,
       "mode": "display"
     },
     {
@@ -2276,13 +2562,13 @@
     },
     {
       "expression": "\\log x,y",
-      "ink_height_pt": 18.5,
+      "ink_height_pt": 18.375,
       "ink_width_pt": 61.625,
       "mode": "display"
     },
     {
       "expression": "\\log x\\,y",
-      "ink_height_pt": 18.5,
+      "ink_height_pt": 18.375,
       "ink_width_pt": 57.625,
       "mode": "display"
     },
@@ -2306,7 +2592,7 @@
     },
     {
       "expression": "\\log x\\frac{a}{b}",
-      "ink_height_pt": 38.375,
+      "ink_height_pt": 38.25,
       "ink_width_pt": 54.875,
       "mode": "display"
     },
@@ -2319,30 +2605,30 @@
     {
       "expression": "\\sqrt{x\\log x},y",
       "ink_height_pt": 24.875,
-      "ink_width_pt": 91.25,
+      "ink_width_pt": 91.375,
       "mode": "display"
     },
     {
       "expression": "x a/b",
-      "ink_height_pt": 18.375,
+      "ink_height_pt": 18.25,
       "ink_width_pt": 46.75,
       "mode": "display"
     },
     {
       "expression": "2a/b",
-      "ink_height_pt": 18.375,
+      "ink_height_pt": 18.25,
       "ink_width_pt": 45.875,
       "mode": "display"
     },
     {
       "expression": "a/b,x",
-      "ink_height_pt": 18.375,
+      "ink_height_pt": 18.25,
       "ink_width_pt": 54.125,
       "mode": "display"
     },
     {
       "expression": "x+a/b",
-      "ink_height_pt": 18.375,
+      "ink_height_pt": 18.25,
       "ink_width_pt": 67.375,
       "mode": "display"
     },
@@ -2354,19 +2640,19 @@
     },
     {
       "expression": "a/b x",
-      "ink_height_pt": 18.375,
+      "ink_height_pt": 18.25,
       "ink_width_pt": 46.75,
       "mode": "display"
     },
     {
       "expression": "a/b(x)",
-      "ink_height_pt": 19.25,
+      "ink_height_pt": 19.375,
       "ink_width_pt": 62.25,
       "mode": "display"
     },
     {
       "expression": "(x)a/b",
-      "ink_height_pt": 19.25,
+      "ink_height_pt": 19.375,
       "ink_width_pt": 61.875,
       "mode": "display"
     },
@@ -2378,14 +2664,170 @@
     },
     {
       "expression": "\\text{“ab”}",
-      "ink_height_pt": 14.625,
+      "ink_height_pt": 14.75,
       "ink_width_pt": 35.5,
       "mode": "display"
     },
     {
       "expression": "\\text{a×b}",
-      "ink_height_pt": 14.625,
+      "ink_height_pt": 14.75,
       "ink_width_pt": 34.5,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\frac{\\frac{a}{b}}{c}\\right)",
+      "ink_height_pt": 54.125,
+      "ink_width_pt": 33.375,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\frac{a}{\\frac{b}{c}}\\right)",
+      "ink_height_pt": 59.25,
+      "ink_width_pt": 35.0,
+      "mode": "display"
+    },
+    {
+      "expression": "\\frac{\\frac{a}{b}}{c}",
+      "ink_height_pt": 54.25,
+      "ink_width_pt": 15.625,
+      "mode": "display"
+    },
+    {
+      "expression": "\\frac{a}{\\frac{b}{c}}",
+      "ink_height_pt": 58.125,
+      "ink_width_pt": 15.625,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\sqrt{\\frac{a}{b}}\\right)",
+      "ink_height_pt": 51.0,
+      "ink_width_pt": 46.375,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\sum_{i=1}^{n} a_i\\right)",
+      "ink_height_pt": 51.0,
+      "ink_width_pt": 88.625,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\sum\\limits_{i=1}^{n} a_i\\right)",
+      "ink_height_pt": 74.5,
+      "ink_width_pt": 71.75,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(x_i\\right)",
+      "ink_height_pt": 19.25,
+      "ink_width_pt": 30.0,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\frac{x}{y}\\right)",
+      "ink_height_pt": 51.0,
+      "ink_width_pt": 31.375,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\frac{x}{y^2}\\right)",
+      "ink_height_pt": 51.0,
+      "ink_width_pt": 41.375,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left[\\frac{\\frac{a}{b}}{c}\\right]",
+      "ink_height_pt": 59.5,
+      "ink_width_pt": 25.125,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left\\{\\sqrt{\\frac{a}{b}}\\right\\}",
+      "ink_height_pt": 50.75,
+      "ink_width_pt": 44.625,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left|\\frac{a}{\\frac{b}{c}}\\right|",
+      "ink_height_pt": 59.5,
+      "ink_width_pt": 22.125,
+      "mode": "display"
+    },
+    {
+      "expression": "\\frac{\\frac{2\\text{b}}{3}}{4}",
+      "ink_height_pt": 58.75,
+      "ink_width_pt": 26.125,
+      "mode": "display"
+    },
+    {
+      "expression": "x^{\\frac{a}{b}}",
+      "ink_height_pt": 25.75,
+      "ink_width_pt": 20.875,
+      "mode": "display"
+    },
+    {
+      "expression": "m^{1/4}",
+      "ink_height_pt": 18.375,
+      "ink_width_pt": 41.5,
+      "mode": "display"
+    },
+    {
+      "expression": "2^{\\lceil a/2\\rceil}",
+      "ink_height_pt": 18.25,
+      "ink_width_pt": 44.75,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(x^{y^z}\\right)",
+      "ink_height_pt": 25.125,
+      "ink_width_pt": 44.75,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(x_{y_z}\\right)",
+      "ink_height_pt": 25.0,
+      "ink_width_pt": 41.625,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\frac{a}{b^2}\\right)",
+      "ink_height_pt": 39.625,
+      "ink_width_pt": 37.375,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\frac{a^2}{b^2}\\right)",
+      "ink_height_pt": 51.5,
+      "ink_width_pt": 40.75,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\frac{\\frac{a}{b}}{\\frac{c}{d}}\\right)",
+      "ink_height_pt": 74.5,
+      "ink_width_pt": 38.5,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\frac{\\frac{1}{2}}{3}\\right)",
+      "ink_height_pt": 59.25,
+      "ink_width_pt": 34.5,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\frac{1}{\\frac{2}{3}}\\right)",
+      "ink_height_pt": 61.75,
+      "ink_width_pt": 34.5,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\frac{a+b}{c}\\right)",
+      "ink_height_pt": 51.0,
+      "ink_width_pt": 66.625,
+      "mode": "display"
+    },
+    {
+      "expression": "\\left(\\frac{\\sqrt{a}}{b}\\right)",
+      "ink_height_pt": 51.125,
+      "ink_width_pt": 44.625,
       "mode": "display"
     }
   ],

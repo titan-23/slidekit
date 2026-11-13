@@ -3,6 +3,7 @@
 # 作り直し（この注記は消えるので書き戻す）: uv pip compile pyproject.toml --extra math --extra svg --extra bibliography --extra test --extra dev --python-version 3.12 --no-header --no-annotate -o requirements-lock.txt
 bibtexparser==2.1.0
 black==26.10.1
+budoux==0.10.3
 cairocffi==1.7.1
 cairosvg==2.9.1
 cffi==2.1.1

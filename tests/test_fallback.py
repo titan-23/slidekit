@@ -21,6 +21,9 @@ from slidekit.fallback import (
     MAX_MARGIN_PT,
     _crop_png,
     _math_fonts,
+    _Region,
+    _shape_regions,
+    _wrap_math,
     compare_package_structure,
     crop_rectangle,
     fallback_required,
@@ -182,7 +185,7 @@ def test_crop_includes_overflowing_own_glyph_and_fill():
     # 基点が枠内の文字の外接矩形と、その後に描いた塗りを含める。右端の文字は基点が 0.5 pt の余裕の外なので含めない。
     crop, details = crop_of(draw, (30, 40, 230, 110))
     assert list(crop) == [30, 40, 230, 118]
-    assert details == {"margin_pt": [0, 0, 0, 8], "clipped": False, "outline_pt": 0.0}
+    assert details == {"margin_pt": [0, 0, 0, 8], "clipped": False, "outline_pt": 0.0, "nearby_elements": []}
     glyph, _ = crop_of(lambda page: page.insert_text((35, 108), "g", fontsize=24), (30, 40, 230, 110))
     assert glyph.y1 > 110
 
@@ -362,6 +365,183 @@ def test_clipped_crop_is_recorded(tmp_path):
     write_pptx(scene([math_element(area=(100, 100, 200, 40))]), project(tmp_path), native)
     crop = finalize_math(native, pdf_pages(tmp_path / "native.pdf", far), final)["crops"][0]
     assert crop["clipped"] and crop["crop_pt"] == [100, 95, 300, 156] and crop["margin_pt"] == [0, 5, 0, 16]
+    # 超えた部分に掛かるほかの要素はない（数式自身のはみ出し）。
+    assert crop["nearby_elements"] == []
+
+
+# ---------------------------------------------------------------- ほかの要素の描画を切り出しに含めない
+
+RED = (0.75, 0, 0)
+# 矢印の線幅（pt）と、PowerPoint の矢印の範囲の余裕（`_REGION_MARGIN_PT` + 線幅の `_LINE_END_FACTOR` 倍）。
+ARROW_WIDTH = 1.8
+ARROW = {"id": "branch", "box_pt": [183, 245, 228, 272], "segment_pt": [183, 245, 228, 272], "tolerance_pt": 6.4}
+# 矢印の近くの数式 u15 の図形の矩形。
+LABEL = (140, 250, 188, 280)
+
+
+def arrow_outline(start, end, width=ARROW_WIDTH):
+    """線と先端（幅と長さは線幅の 3 倍。先端は終点）を 1 つの多角形にした矢印の輪郭。PowerPoint は矢印をこの形の塗りで描く。"""
+    (x0, y0), (x1, y1) = start, end
+    length = math.hypot(x1 - x0, y1 - y0)
+    ux, uy = (x1 - x0) / length, (y1 - y0) / length
+    nx, ny = -uy, ux
+    half, head = width / 2, width * 3
+    bx, by = x1 - ux * head, y1 - uy * head
+    return [
+        (x0 + nx * half, y0 + ny * half),
+        (bx + nx * half, by + ny * half),
+        (bx + nx * head / 2, by + ny * head / 2),
+        (x1, y1),
+        (bx - nx * head / 2, by - ny * head / 2),
+        (bx - nx * half, by - ny * half),
+        (x0 - nx * half, y0 - ny * half),
+    ]
+
+
+def fill_polygon(page, points, fill=RED):
+    shape = page.new_shape()
+    shape.draw_polyline(points)
+    shape.finish(color=None, fill=fill, closePath=True)
+    shape.commit()
+
+
+def branch(page, start=(183, 245), end=(228, 272)):
+    """矢印（既定は (183, 245) から (228, 272)）を描いた直後に、矩形 LABEL の数式 u15 を矢印と同じ色で描く（利用者の資料の配置）。
+
+    矢印の始点は数式の矩形の中にあり、終点は矩形の右から 40 pt 離れる（切り出す範囲の上限は 16 pt）。
+    """
+    fill_polygon(page, arrow_outline(start, end))
+    page.insert_text((150, 271), "u", fontsize=20, color=RED)
+    page.insert_text((161, 276), "15", fontsize=14, color=RED)
+
+
+def test_crop_excludes_arrow_drawn_just_before_math():
+    # 矢印は数式の文字と同じ色で、数式の直前に 1 つの塗りとして描かれる。数式の線（括弧・根号）と同じ条件に合うので、
+    # ほかの要素の範囲を渡さないと矢印まで含め、右の上限で切り詰める。
+    crop, details = crop_of(branch, LABEL)
+    assert details["clipped"] and details["margin_pt"][2] == 16 and details["nearby_elements"] == []
+    # 矢印の範囲を渡すと、塗りの外接矩形が矢印の範囲とほぼ一致するので矢印の描画とみなし、含めない。
+    crop, details = crop_of(branch, LABEL, neighbors=[ARROW])
+    assert list(crop) == list(LABEL) and not details["clipped"] and details["nearby_elements"] == []
+
+
+def test_crop_reports_elements_in_clipped_part():
+    # 矢印を区別できない（範囲を知らない）まま切り詰めたときは、上限の外の部分に範囲が掛かる要素を示す。
+    # 数式を載せた箱（矩形を含む）と、離れた要素は示さない。
+    neighbors = [
+        {"id": "panel", "box_pt": [100, 200, 400, 350], "tolerance_pt": 1.5},
+        {"id": "tag", "box_pt": [206, 240, 240, 262], "tolerance_pt": 1},
+        {"id": "far", "box_pt": [400, 400, 500, 450], "tolerance_pt": 1},
+    ]
+    _, details = crop_of(branch, LABEL, neighbors=neighbors)
+    assert details["clipped"] and details["nearby_elements"] == ["tag"]
+
+
+def test_crop_excludes_separately_drawn_arrow_head():
+    # 数式を指す矢印の線と先端を別の塗りで描くと、先端（数式の矩形に掛かる）だけでは範囲と一致しない。
+    # 先端が数式の矩形の外へ出ていて、4 隅が矢印の線分から余裕の内にあれば、矢印の描画とみなす。
+    def pointing(page):
+        page.draw_rect((191.4, 264.1, 260, 265.9), color=None, fill=RED)
+        fill_polygon(page, [(186, 265), (191.4, 262.3), (191.4, 267.7)])
+        page.insert_text((150, 271), "u", fontsize=20, color=RED)
+
+    arrow = {"id": "pointer", "box_pt": [186, 265, 260, 265], "segment_pt": [260, 265, 186, 265], "tolerance_pt": 6.4}
+    crop, _ = crop_of(pointing, LABEL)
+    assert crop.x1 > 191
+    crop, details = crop_of(pointing, LABEL, neighbors=[arrow])
+    assert list(crop) == list(LABEL) and not details["clipped"]
+    # 数式の矩形（0.5 pt の余裕を含む）に収まる描画は、線分に近くても数式の線と区別できないので、矢印の描画とみなさない。
+    region, probe = _Region(arrow), Box(*LABEL).expanded(0.5)
+    assert region.drew(Box(186, 262.3, 191.4, 267.7), probe)
+    assert not region.drew(Box(186, 262.3, 188.2, 267.7), probe)
+
+
+def test_crop_keeps_own_lines_near_other_elements():
+    # 数式を載せた箱と、矩形のすぐ下の横線があっても、矩形の下へはみ出した括弧（数式の線）は含める。
+    # 括弧の外接矩形は箱の範囲と一致せず、4 隅が横線から離れている。
+    neighbors = [
+        {"id": "panel", "box_pt": [80, 80, 400, 200], "tolerance_pt": 1.5},
+        {"id": "rule", "box_pt": [100, 140, 300, 140], "segment_pt": [100, 140, 300, 140], "tolerance_pt": 4},
+    ]
+    crop, details = crop_of(nested_math, (100, 100, 300, 124), neighbors=neighbors)
+    assert list(crop) == [100, 100, 300, 136] and not details["clipped"]
+
+
+def arrow_element(identifier, start, end, width=ARROW_WIDTH):
+    (x0, y0), (x1, y1) = start, end
+    return {
+        "id": identifier,
+        "kind": "arrow",
+        "area": [min(x0, x1), min(y0, y1), abs(x1 - x0), abs(y1 - y0)],
+        "start": list(start),
+        "end": list(end),
+        "style": {"line_color": "C00000", "line_width_pt": width},
+    }
+
+
+def test_finalize_excludes_arrow_from_slide(tmp_path):
+    # 最終形の PPTX のスライドから矢印の範囲を読み、切り出しに矢印を含めない。向きが逆の矢印（反転した図形）は、
+    # 外接矩形が同じで、線分の始点と終点が入れ替わる。
+    label = math_element("branch_label", "u_{15}", area=(140, 250, 48, 30))
+    for name, start, end in (("forward", (183, 245), (228, 272)), ("reverse", (228, 272), (183, 245))):
+        data = scene([arrow_element("branch", start, end), label])
+        (tmp_path / name).mkdir()
+        paths, _, final = build_final_form(
+            tmp_path / name, data, lambda page, start=start, end=end: branch(page, start, end)
+        )
+        (crop,) = final["crops"]
+        assert crop["crop_pt"] == list(LABEL) and not crop["clipped"] and crop["nearby_elements"] == []
+        (shape,) = _wrap_math(read_package(paths["native.pptx"]), ["ppt/slides/slide1.xml"], (720, 540), 4)
+        assert shape["neighbors"] == [{**ARROW, "segment_pt": [*start, *end]}]
+
+
+def test_shape_regions_follow_group_transform_and_rotation():
+    p, a = NS["p"], NS["a"]
+
+    def shape(name, x, y, width, height, extra=""):
+        return (
+            f'<p:sp><p:nvSpPr><p:cNvPr id="1" name="{name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>'
+            f'<a:xfrm {extra}><a:off x="{x * 12700}" y="{y * 12700}"/><a:ext cx="{width * 12700}" cy="{height * 12700}"/>'
+            '</a:xfrm><a:prstGeom prst="rect"/><a:ln w="25400"><a:solidFill/></a:ln></p:spPr></p:sp>'
+        )
+
+    tree = etree.fromstring(
+        f'<p:spTree xmlns:p="{p}" xmlns:a="{a}"><p:nvGrpSpPr/><p:grpSpPr/>'
+        + shape("turned", 100, 100, 40, 20, 'rot="5400000"')
+        + '<p:grpSp><p:nvGrpSpPr><p:cNvPr id="2" name="group"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm>'
+        f'<a:off x="{200 * 12700}" y="{50 * 12700}"/><a:ext cx="{100 * 12700}" cy="{100 * 12700}"/>'
+        f'<a:chOff x="0" y="0"/><a:chExt cx="{50 * 12700}" cy="{50 * 12700}"/></a:xfrm></p:grpSpPr>'
+        + shape("inner", 10, 10, 20, 10)
+        + "</p:grpSp></p:spTree>"
+    )
+    regions = {region["id"]: region for _, region in _shape_regions(tree)}
+    # 90 度回した図形は中心のまわりで縦長になる。グループの子はグループの拡大（2 倍）と位置を当てる。枠線の外側の半分を余裕に含める。
+    assert regions == {
+        "turned": {"id": "turned", "box_pt": [110, 90, 130, 130], "tolerance_pt": 2},
+        "inner": {"id": "inner", "box_pt": [220, 70, 260, 90], "tolerance_pt": 2},
+    }
+
+
+def test_clipped_warning_names_nearby_elements():
+    from slidekit.pipeline import _Build
+
+    crop = {
+        "slide_id": "first",
+        "element_id": "label",
+        "rectangle_pt": [140, 250, 188, 280],
+        "frame_pt": [124, 234, 204, 296],
+        "crop_pt": [140, 244, 204, 280],
+        "margin_pt": [0, 6, 16, 0],
+        "outline_pt": 0.0,
+        "clipped": True,
+        "nearby_elements": ["branch"],
+    }
+    build = SimpleNamespace(scene=scene([math_element()]))
+    (warning,) = _Build.clipped_crops(build, [crop])
+    assert warning["observations"][0]["nearby_elements"] == ["branch"] and "branch" in warning["message"]
+    # 掛かる要素がなければ、観測値は前と同じ項目にする（許容の記録の証拠を変えない）。
+    (warning,) = _Build.clipped_crops(build, [{**crop, "nearby_elements": []}])
+    assert "nearby_elements" not in warning["observations"][0] and "文字枠を広げる" in warning["message"]
 
 
 def exported(png: bytes) -> bytes:
@@ -440,13 +620,13 @@ def test_known_input_hashes_are_not_computed_again(tmp_path, monkeypatch):
     assert prepare_fallback(final, tmp_path / "again.pptx")["source_sha256"] == original(final)
 
 
-def build_final_form(tmp_path, data=None):
-    """2 ページ目に数式のある資料の中間 PPTX、最終形の PPTX、その PDF、最終 PPTX を作る。"""
+def build_final_form(tmp_path, data=None, draw=own_math):
+    """2 ページ目に数式のある資料の中間 PPTX、最終形の PPTX、その PDF、最終 PPTX を作る。PDF は最後のページだけを draw で描く。"""
     data = data or scene([element("intro")], ("formula", [math_element()]))
     paths = {name: tmp_path / name for name in ("native.pptx", "final_form.pptx", "final_form.pdf", "deck.pptx")}
     write_pptx(data, project(tmp_path), paths["native.pptx"])
     form = prepare_final_form(paths["native.pptx"], paths["final_form.pptx"])
-    pdf_pages(paths["final_form.pdf"], *([None] * (len(data["slides"]) - 1)), own_math)
+    pdf_pages(paths["final_form.pdf"], *([None] * (len(data["slides"]) - 1)), draw)
     final = finalize_math(paths["final_form.pptx"], paths["final_form.pdf"], paths["deck.pptx"])
     return paths, form, final
 

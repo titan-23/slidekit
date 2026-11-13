@@ -160,6 +160,7 @@ def test_fragment_styles_are_resolved_and_written_only_when_given(make_deck):
             Text(" を参照。"),
             Text("（2026 年版）", size_pt=14, color="#606b78"),
             Emphasis("注", bold=False),
+            Text("1", superscript=True),
         ],
     )
     assert element.data["content"] == [
@@ -173,7 +174,10 @@ def test_fragment_styles_are_resolved_and_written_only_when_given(make_deck):
         {"kind": "text", "text": " を参照。"},
         {"kind": "text", "text": "（2026 年版）", "style": {"size_pt": 14, "color": "606B78"}},
         {"kind": "emphasis", "text": "注", "style": {"bold": False}},
+        {"kind": "text", "text": "1", "style": {"superscript": True}},
     ]
+    with pytest.raises(InputError, match="Text の superscript は真偽値で指定してください"):
+        Text("1", superscript="yes")
     # 要素の書式は断片の指定で変わらない。
     assert element.data["style"]["color"] == "20252B"
 
