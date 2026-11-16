@@ -96,15 +96,13 @@ def fixture_run(
     evidence_version=EVIDENCE_VERSION,
     fallback=(),
     media="same",
-    renderers=("powerpoint",),
 ):
     """合成した生成記録を持つ実行を tmp_path/project/out/runs/{name} に作る。
 
     content はページの内容（ノート）、parts は表示を決める PPTX の部品、environment は表示環境、payload は成果物の中身を変える。
     shift と shape は画像だけを変える（証拠は変えない）。number は最初のページの番号で、番号の図形の文字と画像に出る。
     schema=1 は slidekit 0.1 の形式の実行にする。mode と selection で下書き・部分生成の実行にする。
-    fallback は数式のあるページ（PowerPoint の互換表示の確認が要る）、media は互換画像の中身（部品の証拠の full だけを変える）、
-    renderers は表示ソフト（最初が主表示ソフト）である。
+    fallback は数式のあるページ（互換表示の確認が要る）、media は互換画像の中身（部品の証拠の full だけを変える）である。
     """
     project = tmp_path / "project"
     project.mkdir(parents=True, exist_ok=True)
@@ -120,18 +118,10 @@ def fixture_run(
     save(run / "diagnostics.json", {"schema_version": version, "issues": [WARNING] if warning else []})
     for filename in ("deck.pptx", "deck.pdf", "deck.json", "notes.md"):
         (run / filename).write_text(f"{filename}:{payload}", encoding="utf-8")
-    environments = {
-        renderer: display_environment(
-            renderer, {"version": environment}, {"renderer": renderer, "version": environment}, {}, "fixture"
-        )
-        for renderer in renderers
-    }
-    contacts = {
-        renderer: page_image(
-            run / f"renders/{renderer}/standard/contact-001.png", shift=shift, shape=shape, number=number
-        )
-        for renderer in renderers
-    }
+    environment_hash = display_environment(
+        {"version": environment}, {"renderer": "powerpoint", "version": environment}, {}, "fixture"
+    )
+    contact = page_image(run / "renders/powerpoint/standard/contact-001.png", shift=shift, shape=shape, number=number)
     slides, contents, visuals = [], [], []
     clone = 0
     for index, slide_id in enumerate(pages):
@@ -146,34 +136,30 @@ def fixture_run(
             (),
         )
         shown = {}
-        views = [(renderer, "standard") for renderer in renderers] + (
-            [("powerpoint", "fallback")] if slide_id in fallback else []
-        )
-        for renderer, variant in views:
-            path = f"renders/{renderer}/{variant}/slide-{page_number:03d}.png"
+        for variant in ["standard"] + (["fallback"] if slide_id in fallback else []):
+            path = f"renders/powerpoint/{variant}/slide-{page_number:03d}.png"
             pixel_hash = page_image(run / path, shift=shift, shape=shape, number=page_number)
             if variant == "fallback":
                 # 互換表示の確認用複製は数式のページだけなので、証拠の位置は複製の中の位置である。
                 clone += 1
             evidence = visual_digest(
                 page,
-                renderer,
                 variant,
-                environments[renderer],
+                environment_hash,
                 render_date=RENDER_DATE,
                 number=clone if variant == "fallback" else None,
             )
-            shown[f"{renderer}:{variant}"] = {
+            shown[f"powerpoint:{variant}"] = {
                 "path": path,
                 "pixel_hash": pixel_hash,
-                "environment_hash": environments[renderer],
+                "environment_hash": environment_hash,
                 "evidence_hash": evidence,
             }
             visuals.append(
                 {
                     "kind": "visual",
                     "slide_id": slide_id,
-                    "renderer": renderer,
+                    "renderer": "powerpoint",
                     "variant": variant,
                     "evidence_hash": evidence,
                 }
@@ -201,11 +187,10 @@ def fixture_run(
         {
             "kind": "overview",
             "slide_id": None,
-            "renderer": renderer,
+            "renderer": "powerpoint",
             "variant": "standard",
-            "evidence_hash": overview_digest([contacts[renderer]], environments[renderer], deck),
+            "evidence_hash": overview_digest([contact], environment_hash, deck),
         }
-        for renderer in renderers
     ]
     manifest = {
         "schema_version": version,
@@ -222,7 +207,6 @@ def fixture_run(
         "config": {
             "output_dir": str(project / "out"),
             "inputs": {"read_roots": [str(project)], "asset_dirs": [str(project / "assets")]},
-            "render": {"primary": renderers[0], "required": list(renderers)},
         },
         "environment": {},
         "artifacts": {str(path.relative_to(run)): file_hash(path) for path in sorted(run.rglob("*")) if path.is_file()},
@@ -352,7 +336,6 @@ def run_command(command, **replacements):
             options.get("--slides"),
             options["--reviewer"],
             options["--note"],
-            options.get("--renderer"),
             options.get("--variant", "standard"),
             status_id=options.get("--status-id"),
         )
@@ -1539,34 +1522,26 @@ def test_placeholder_reviewer_note_and_reason_are_rejected(tmp_path):
 
 def test_record_multiple_kinds_and_all_variants(tmp_path):
     pages = ["intro", "formula", "summary"]
-    run = fixture_run(tmp_path, pages=tuple(pages), fallback=("formula",), renderers=("powerpoint", "libreoffice"))
-    first = records.record_review(run, "visual,content", "all", "確認者", "表示と内容を確認", variant="all")
+    run = fixture_run(tmp_path, pages=tuple(pages), fallback=("formula",))
+    first = records.record_review(run, "visual,content", "2", "確認者", "表示と内容を確認", variant="all")
     assert re.fullmatch(r"b_[0-9a-f]{16}", first["batch"])
     assert {record["batch"] for record in first["records"]} == {first["batch"]}
-    # 主表示ソフトの標準表示と、互換表示が要るページの互換表示だけを記録する。
-    assert first["targets"] == {
-        "visual:powerpoint:standard": pages,
-        "visual:powerpoint:fallback": ["formula"],
-        "content": pages,
-    }
-    second = records.record_review(
-        run, ["visual", "overview"], "2", "確認者", "全表示ソフトで確認", renderer="all", variant="all"
-    )
-    assert second["batch"] != first["batch"]
-    assert second["targets"] == {
-        "visual:powerpoint:standard": ["formula"],
-        "visual:powerpoint:fallback": ["formula"],
-        "visual:libreoffice:standard": ["formula"],
-        "overview:powerpoint": [None],
-        "overview:libreoffice": [None],
-    }
+    assert first["targets"] == {"visual:standard": ["formula"], "visual:fallback": ["formula"], "content": ["formula"]}
     pending = [
-        (group["kind"], group["renderer"], group["variant"], group["slides"])
+        (group["kind"], group["variant"], group["slides"])
         for group in records.review_status(run)["reviews"]
         if group["pending"]
     ]
-    assert pending == [("visual", "libreoffice", "standard", "1,3")]
-    records.record_review(run, "visual", "all", "確認者", "LibreOffice の表示を確認", renderer="libreoffice")
+    assert pending == [("visual", "standard", "1,3"), ("overview", "standard", None), ("content", None, "1,3")]
+    second = records.record_review(run, ["visual", "overview", "content"], "all", "確認者", "全体を確認", variant="all")
+    assert second["batch"] != first["batch"]
+    # 標準表示と、互換表示が要るページの互換表示だけを記録する。
+    assert second["targets"] == {
+        "visual:standard": pages,
+        "visual:fallback": ["formula"],
+        "overview": [None],
+        "content": pages,
+    }
     assert records.check_build(run, final=True)["status"] == "passed"
     with pytest.raises(records.RecordError, match="一覧画像の確認は標準表示だけである"):
         records.record_review(run, "overview", None, "確認者", "一覧を確認", variant="fallback")
@@ -1616,11 +1591,6 @@ def test_explicit_page_without_fallback_is_rejected(tmp_path):
         ),
     ):
         records.record_review(run, "visual", "1-3", "確認者", "互換表示を確認", variant="fallback")
-    # 確認対象にない表示ソフトのページも記録しない。
-    with pytest.raises(
-        records.RecordError, match=re.escape("表示（libreoffice・標準）の確認が要らないページが含まれている: 2")
-    ):
-        records.record_review(run, "visual", "2", "確認者", "表示を確認", renderer="libreoffice")
     assert records._review(run)["records"] == []
     # --variant all は明示したページの標準表示と、そのうち互換表示が要るページの互換表示を記録する。
     result = records.record_review(run, "visual", "1,2", "確認者", "表示を確認", variant="all")
@@ -1706,16 +1676,15 @@ def test_pending_requires_matching_status_id(tmp_path):
     fresh = records.review_status(second)["reviews"][0]
     assert fresh["slides"] == "2-3" and fresh["status_id"] != stale
     status_id = fresh["status_id"]
-    for kind, renderer, variant, value, message in (
-        ("visual", None, "standard", None, "pending には review status が示す --status-id が必要である"),
-        ("visual,content", None, "standard", status_id, "pending は種類・表示ソフト・表示方法を一つずつ指定する"),
-        ("visual", None, "all", status_id, "pending は種類・表示ソフト・表示方法を一つずつ指定する"),
-        ("visual", "all", "standard", status_id, "pending は種類・表示ソフト・表示方法を一つずつ指定する"),
-        ("overview", None, "standard", status_id, "一覧画像の確認には --slides を指定しない"),
-        ("content", None, "standard", status_id, "未確認のページがない"),
+    for kind, variant, value, message in (
+        ("visual", "standard", None, "pending には review status が示す --status-id が必要である"),
+        ("visual,content", "standard", status_id, "pending は種類・表示方法を一つずつ指定する"),
+        ("visual", "all", status_id, "pending は種類・表示方法を一つずつ指定する"),
+        ("overview", "standard", status_id, "一覧画像の確認には --slides を指定しない"),
+        ("content", "standard", status_id, "未確認のページがない"),
     ):
         with pytest.raises(records.RecordError, match=message):
-            records.record_review(second, kind, "pending", "確認者", "表示を確認", renderer, variant, status_id=value)
+            records.record_review(second, kind, "pending", "確認者", "表示を確認", variant, status_id=value)
     with pytest.raises(records.RecordError, match="--status-id は --slides pending と組み合わせる"):
         records.record_review(second, "visual", "2-3", "確認者", "表示を確認", status_id=status_id)
     result = records.record_review(second, "visual", "pending", "確認者", "表示を確認", status_id=status_id)
@@ -2525,7 +2494,7 @@ def test_environment_changes_list_versions_and_fonts():
 
     before, after = manifest("16.0.1", "5.13.0", "a", "8"), manifest("16.0.2", "5.14.0", "b")
     assert records._environment_changes(before, after) == [
-        {"item": "表示ソフト powerpoint", "before": "16.0.1", "after": "16.0.2"},
+        {"item": "PowerPoint", "before": "16.0.1", "after": "16.0.2"},
         {"item": "pypdfium2", "before": "5.13.0", "after": "5.14.0"},
         {"item": "計測の版", "before": "8", "after": "9"},
         {"item": "フォント Arial", "before": "Version a", "after": "Version b"},

@@ -16,7 +16,6 @@ from pathlib import Path
 import re
 from typing import Any
 
-from .fallback import fallback_required
 from .layout import Rect, as_rect
 from .math.commands import SPACES
 from .measure import MEASURE_VERSION, MODEL, ElementLayout, FontSource, _visible, layout_scene, text_area
@@ -24,7 +23,7 @@ from .pdf_layout import RenderedText, _area, _em, _font_name, _text_in_math, rea
 from .pptx_validation import _normalize_text
 from .validators import _contains, _content, _has_math, _normal_text, make_diagnostic, merge_diagnostics
 
-RECORD_VERSION = 1  # renders/<表示ソフト>/<表示>/layout.json の形式。形を変えたら上げる
+RECORD_VERSION = 1  # renders/powerpoint/<表示>/layout.json の形式。形を変えたら上げる
 _TEXT_LENGTH = 40  # 診断に添える要素の文字の長さ
 _EPSILON = 1e-6
 # 字形を描かない数式の命令（空白の命令と \text の名前）。数式からこれと波括弧と空白を除いて何も残らなければ、字形を求めない。
@@ -35,7 +34,6 @@ def validate_pdf(
     path: Path,
     scene: dict,
     project: Any,
-    renderer: str = "powerpoint",
     variant: str = "standard",
     *,
     fonts: FontSource | None = None,
@@ -48,10 +46,10 @@ def validate_pdf(
     `layouts` は `measure.layout_scene()` の結果である。渡さなければ `fonts`（`measure.FontSource`）から計算し、
     `fonts` もなければ予測を使う検査（行数）を省く。インクは予測を使わずに、要素の文字領域と比べる
     （許容幅は、塗りか線のある枠 0.5 pt、ない枠 1.5 pt）。
-    `page_evidence` はページの識別子から表示の証拠（そのページ・表示ソフト・表示方法）への対応である。渡すと、
-    ページの診断の証拠をその値と表示ソフト・表示方法にし、要素の診断はそれに要素を加える。ページ番号が変わっても、
+    `page_evidence` はページの識別子から表示の証拠（そのページ・表示方法）への対応である。渡すと、
+    ページの診断の証拠をその値と表示方法にし、要素の診断はそれに要素を加える。ページ番号が変わっても、
     表示が同じなら証拠は変わらない。渡さなければ、要素かページの全体と表示環境を証拠にする。
-    `layout_record` に辞書を渡すと、`renders/<表示ソフト>/<表示>/layout.json` の内容（予測と実際）をそこへ書く。
+    `layout_record` に辞書を渡すと、`renders/powerpoint/<表示>/layout.json` の内容（予測と実際）をそこへ書く。
     欠落の候補（`pdf_text_missing`）は 2 つの方法で示す。文字の書体で描く部分（通常の文字と数式の `\\text{...}` の中身）は
     ページの抽出した文字と照らし、数式は、数式の字形も数式の線も割り当てられなかった要素の一覧で示す（文字と数式が混じる要素で
     数式だけが描かれない場合を含む。空白の命令だけの数式は除く）。
@@ -62,9 +60,9 @@ def validate_pdf(
     from .pdf import open_pdf
 
     issues: list[dict] = []
-    scope = f"pdf:{renderer}:{variant}"
-    environment = project.environment.get("renderers", {}).get(renderer, {})
-    rasterized_math = variant == "fallback" or (renderer == "libreoffice" and fallback_required(scene, project))
+    scope = f"pdf:powerpoint:{variant}"
+    environment = project.environment.get("powerpoint", {})
+    rasterized_math = variant == "fallback"
     if layouts is None and fonts is not None:
         layouts = layout_scene(scene, fonts)
     pages: list[dict] = []
@@ -73,14 +71,14 @@ def validate_pdf(
         # 重大度は診断の表の値を使う（make_diagnostic が決める）。
         visual = page_evidence.get(slide.get("id")) if slide is not None and page_evidence is not None else None
         if visual is not None:
-            evidence = {"page": visual, "renderer": renderer, "variant": variant}
+            evidence = {"page": visual, "renderer": "powerpoint", "variant": variant}
             if element is not None:
                 evidence["element"] = element
         else:
             evidence = {
                 "element": element,
                 "slide": slide if element is None else None,
-                "renderer": renderer,
+                "renderer": "powerpoint",
                 "variant": variant,
                 "environment": environment,
                 "fonts": project.environment.get("fonts", {}),
@@ -126,7 +124,7 @@ def validate_pdf(
         layout_record.update(
             {
                 "schema_version": RECORD_VERSION,
-                "renderer": renderer,
+                "renderer": "powerpoint",
                 "variant": variant,
                 "measure_version": MEASURE_VERSION,
                 "slides": pages,

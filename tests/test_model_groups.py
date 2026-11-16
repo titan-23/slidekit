@@ -94,12 +94,9 @@ def test_pptx_group_requires_contiguous_children(make_deck, tmp_path):
     assert caught.value.code == "input_error" and caught.value.element_id == "wrong"
 
 
-@pytest.mark.parametrize("required", [["powerpoint"], ["powerpoint", "libreoffice"]])
-def test_math_group_is_flat(make_deck, required):
-    # 数式を含むまとまりは、PowerPoint だけの資料でも、LibreOffice が必須の資料でもグループにしない。
-    # 数式を含まない内側のまとまりは、外側によらずグループにする。
-    listing = ", ".join(f'"{name}"' for name in required)
-    deck = make_deck(extra=f"\n[render]\nrequired = [{listing}]\n")
+def test_math_group_is_flat(make_deck):
+    # 数式を含むまとまりはグループにしない。数式を含まない内側のまとまりは、外側によらずグループにする。
+    deck = make_deck()
     slide = deck.slide(id="formula", kind="blank")
     outer = slide.group(id="outer", area=Rect(40, 40, 400, 200))
     outer.equation(id="sum", expression="a+b", area=Rect(0, 0, 100, 40))

@@ -898,7 +898,7 @@ def _record_problem(state: _Run, record: dict) -> str | None:
 
 
 def _visual(manifest: dict, slide_id: str, key: str) -> dict | None:
-    """生成記録のページの表示の画像（path と pixel_hash を持つ）。key は "表示ソフト:表示方法"。なければ None。"""
+    """生成記録のページの表示の画像（path と pixel_hash を持つ）。key は "powerpoint:表示方法"。なければ None。"""
     slide = next((item for item in manifest["slides"] if item["id"] == slide_id), None)
     visuals = slide.get("visuals") if slide is not None else None
     visual = visuals.get(key) if isinstance(visuals, dict) else None
@@ -1228,36 +1228,11 @@ def _status_id(state: _Run, kind: str, renderer: str | None, variant: str | None
     return "s_" + json_digest(value)[:16]
 
 
-def _primary(manifest: dict) -> str:
-    """主表示ソフト（設定の render.primary。なければ確認対象から求める）。"""
-    render = manifest["config"].get("render")
-    primary = render.get("primary") if isinstance(render, dict) else None
-    if isinstance(primary, str) and primary:
-        return primary
-    found = [
-        item.get("renderer")
-        for item in manifest["required_reviews"]
-        if item.get("kind") == "visual" and isinstance(item.get("renderer"), str)
-    ]
-    return "powerpoint" if not found or "powerpoint" in found else found[0]
-
-
-def _renderers(manifest: dict, kind: str) -> list[str]:
-    """種類の確認対象にある表示ソフト（主表示ソフトを先に、ほかは名前の順）。"""
-    primary = _primary(manifest)
-    found = {
-        item["renderer"]
-        for item in manifest["required_reviews"]
-        if item.get("kind") == kind and isinstance(item.get("renderer"), str)
-    }
-    return sorted(found, key=lambda name: (name != primary, name))
-
-
-def _label(kind: str, renderer: str | None, variant: str | None) -> str:
+def _label(kind: str, variant: str | None) -> str:
     if kind == "visual":
-        return f"表示（{renderer}・{'互換' if variant == 'fallback' else '標準'}）"
+        return f"表示（{'互換' if variant == 'fallback' else '標準'}）"
     if kind == "overview":
-        return f"一覧画像（{renderer}）"
+        return "一覧画像"
     return "内容"
 
 
@@ -1472,8 +1447,9 @@ def _select_slides(spec: str, manifest: dict) -> list[str]:
         raise RecordError(str(error)) from error
 
 
-def _groups_for(manifest: dict, kinds: list[str], renderer: str | None, variant: str) -> list[tuple]:
-    """記録する（種類、表示ソフト、表示方法）の組。renderer の None は主表示ソフト、all は確認対象にある全表示ソフトである。"""
+def _groups_for(kinds: list[str], variant: str) -> list[tuple]:
+    """記録する（種類、表示ソフト、表示方法）の組。値は確認対象の kind・renderer・variant と同じで、
+    内容の確認では表示ソフトと表示方法が None である。"""
     groups = []
     for kind in kinds:
         if kind == "content":
@@ -1481,9 +1457,8 @@ def _groups_for(manifest: dict, kinds: list[str], renderer: str | None, variant:
             continue
         if kind == "overview" and variant == "fallback":
             raise RecordError("一覧画像の確認は標準表示だけである。--variant fallback と組み合わせない")
-        renderers = _renderers(manifest, kind) if renderer == "all" else [renderer or _primary(manifest)]
         variants = ["standard"] if kind == "overview" else (list(_VARIANTS) if variant == "all" else [variant])
-        groups.extend((kind, name, value) for name in renderers for value in variants)
+        groups.extend((kind, "powerpoint", value) for value in variants)
     return groups
 
 
@@ -1493,12 +1468,12 @@ def _not_needed(kind: str, groups: list[tuple], missing: list[str], numbers: Map
         return (
             f"互換表示の確認が要らないページが含まれている: {pages}（数式がない）。all を使うと必要なページだけを選ぶ"
         )
-    labels = "、".join(_label(*group) for group in groups)
+    labels = "、".join(_label(kind, variant) for kind, _, variant in groups)
     return f"{labels}の確認が要らないページが含まれている: {pages}。all を使うと必要なページだけを選ぶ"
 
 
 def _record_targets(
-    run: Path, cache: dict, kinds: list[str], slides: Any, renderer: str | None, variant: str, status_id: str | None
+    run: Path, cache: dict, kinds: list[str], slides: Any, variant: str, status_id: str | None
 ) -> list[dict]:
     """記録する確認対象（生成記録の required_reviews の項目）の列。ロックの中で呼ぶ。"""
     state = _state(cache, run)
@@ -1514,10 +1489,10 @@ def _record_targets(
         raise RecordError("--status-id は --slides pending と組み合わせる")
     if page_kinds and text in _KEYWORDS:
         _check_spec(text, manifest)
-    groups = _groups_for(manifest, kinds, renderer, variant)
+    groups = _groups_for(kinds, variant)
     if page_kinds and text == "pending":
-        if len(kinds) != 1 or renderer == "all" or variant == "all":
-            raise RecordError("pending は種類・表示ソフト・表示方法を一つずつ指定する")
+        if len(kinds) != 1 or variant == "all":
+            raise RecordError("pending は種類・表示方法を一つずつ指定する")
         if not isinstance(status_id, str) or not status_id:
             raise RecordError("pending には review status が示す --status-id が必要である")
         pending = _Progress(run, cache).pending(*groups[0])
@@ -1560,17 +1535,15 @@ def _record_targets(
         if selected is not None and missing:
             raise RecordError(_not_needed(kind, kind_groups, missing, numbers))
     if not result:
-        labels = "、".join(_label(*group) for group in groups)
+        labels = "、".join(_label(kind, variant) for kind, _, variant in groups)
         raise RecordError(f"指定した確認対象が生成記録にない: {labels}")
     return result
 
 
 def _target_name(target: dict) -> str:
-    if target["kind"] == "content":
-        return "content"
-    if target["kind"] == "overview":
-        return f"overview:{target.get('renderer')}"
-    return f"visual:{target.get('renderer')}:{target.get('variant')}"
+    if target["kind"] in ("content", "overview"):
+        return target["kind"]
+    return f"visual:{target.get('variant')}"
 
 
 def record_review(
@@ -1579,7 +1552,6 @@ def record_review(
     slides: Any,
     reviewer: str,
     note: str,
-    renderer: str | None = None,
     variant: str = "standard",
     *,
     status_id: str | None = None,
@@ -1589,10 +1561,10 @@ def record_review(
 
     run は実行のパスか番号（latest は指定できない。project は番号を探す資料）。kind は "visual"、"visual,content" のような
     カンマ区切りか、その列。slides は表示・内容の確認では必須で、all（選んだ確認が要る全ページ）、pending（review status が示した
-    未確認のページ。status_id が必須で、種類・表示ソフト・表示方法を一つずつ指定する）、番号・範囲・識別子・id:識別子のカンマ区切り、
-    または識別子の列である。一覧画像だけなら None か all。renderer は表示ソフト（None は主表示ソフト、all は確認対象にある全表示ソフト）、
-    variant は standard・fallback・all である。明示したページにその確認が要らなければエラーにし、all の表示ソフト・表示方法では
-    要らない組を飛ばす。確認者と確認内容は、review status が示した置き場所（< > で囲んだ値）のままでは記録しない。
+    未確認のページ。status_id が必須で、種類・表示方法を一つずつ指定する）、番号・範囲・識別子・id:識別子のカンマ区切り、
+    または識別子の列である。一覧画像だけなら None か all。variant は standard・fallback・all である。
+    明示したページにその確認が要らなければエラーにし、all の表示方法では要らない組を飛ばす。
+    確認者と確認内容は、review status が示した置き場所（< > で囲んだ値）のままでは記録しない。
     1 回の呼び出しで作る記録には同じ batch を付ける。
 
     成果物が生成記録と一致する、完了した全ページの通常の生成にだけ記録できる。入力が生成後に変わっていても記録はでき、
@@ -1603,15 +1575,13 @@ def record_review(
     _written(note, "確認内容", "画像や本文を開いて確かめた内容を書く")
     if variant not in (*_VARIANTS, "all"):
         raise RecordError(f"表示方法が不正である（standard、fallback、all）: {variant}")
-    if renderer is not None and (not isinstance(renderer, str) or not renderer.strip()):
-        raise RecordError(f"表示ソフトが不正である: {renderer!r}")
     run = _run_path(resolve_run(run, project=project, allow_latest=False))
     with _output_lock(_recording_output(run)):
         cache: dict[Path, _Run] = {}
         state = _state(cache, run)
         _assert_recordable(state)
         notices = _notices(state.manifest)
-        targets = _record_targets(run, cache, kinds, slides, renderer, variant, status_id)
+        targets = _record_targets(run, cache, kinds, slides, variant, status_id)
         batch = _new_batch()
         records = [
             _new_record(
@@ -2275,7 +2245,7 @@ def _pending_reason(required: dict, originals: list, manifest: dict) -> dict:
 
 
 def _environment_changes(before: dict, after: dict) -> list[dict]:
-    """2 つの実行の生成記録の環境（表示ソフト・パッケージ・Python・フォント・計測の版）の違い。"""
+    """2 つの実行の生成記録の環境（PowerPoint・パッケージ・Python・フォント・計測の版）の違い。"""
     old, new = before.get("environment") or {}, after.get("environment") or {}
     changes = []
 
@@ -2283,13 +2253,11 @@ def _environment_changes(before: dict, after: dict) -> list[dict]:
         if a != b:
             changes.append({"item": item, "before": a, "after": b})
 
-    renderers = (old.get("renderers") or {}, new.get("renderers") or {})
-    for name in sorted(set(renderers[0]) | set(renderers[1])):
-        compare(
-            f"表示ソフト {name}",
-            (renderers[0].get(name) or {}).get("version"),
-            (renderers[1].get(name) or {}).get("version"),
-        )
+    compare(
+        "PowerPoint",
+        ((old.get("renderers") or {}).get("powerpoint") or {}).get("version"),
+        ((new.get("renderers") or {}).get("powerpoint") or {}).get("version"),
+    )
     packages = (old.get("packages") or {}, new.get("packages") or {})
     for name in sorted(set(packages[0]) | set(packages[1])):
         compare(name, packages[0].get(name), packages[1].get(name))
@@ -2333,7 +2301,6 @@ def _review_groups(state: _Run, progress: _Progress, numbers: Mapping[str, int])
 
     未確認のページには、最後の自動の引き継ぎが記録した引き継げなかった理由（reason・documents）を添える。
     """
-    primary = _primary(state.manifest)
     attempts = state.review.get("carry_attempts") or []
     last = attempts[-1] if attempts and isinstance(attempts[-1], dict) else {}
     reasons = {
@@ -2376,12 +2343,7 @@ def _review_groups(state: _Run, progress: _Progress, numbers: Mapping[str, int])
     result = []
     for (kind, renderer, variant), group in sorted(
         groups.items(),
-        key=lambda item: (
-            _KIND_ORDER.index(item[0][0]),
-            item[0][1] != primary,
-            item[0][1] or "",
-            item[0][2] != "standard",
-        ),
+        key=lambda item: (_KIND_ORDER.index(item[0][0]), item[0][2] != "standard"),
     ):
         pages = kind != "overview" and bool(group["pending"])
         group["slides"] = (
@@ -2396,14 +2358,11 @@ def _review_groups(state: _Run, progress: _Progress, numbers: Mapping[str, int])
     return result
 
 
-def _record_command(run: Path, group: dict, primary: str) -> str:
+def _record_command(run: Path, group: dict) -> str:
     """未確認の組を記録するコマンド。確認者と確認内容は置き場所で示す（画像を見て書き換えてから実行する）。"""
     parts = ["slidekit review record --build", _shown(run), "--kind", group["kind"]]
-    if group["kind"] != "content":
-        if group["renderer"] != primary:
-            parts += ["--renderer", group["renderer"]]
-        if group["variant"] != "standard":
-            parts += ["--variant", group["variant"]]
+    if group["kind"] != "content" and group["variant"] != "standard":
+        parts += ["--variant", group["variant"]]
     if group["kind"] != "overview":
         parts += ["--slides", group["slides"]]
     parts += ["--reviewer", f'"{REVIEWER_PLACEHOLDER}"', "--note", f'"{NOTE_PLACEHOLDER}"']
@@ -2492,8 +2451,7 @@ def review_status(run: Any = "latest", *, project: Any = None) -> dict:
     elif status == "complete":
         operations = [f"slidekit export --build {_shown(run)}"]
     else:
-        primary = _primary(manifest)
-        operations = [_record_command(run, group, primary) for group in groups if group["pending"]]
+        operations = [_record_command(run, group) for group in groups if group["pending"]]
         if len(operations) > 1:
             # 画像と本文をすべて見た後に、未確認の確認をまとめて 1 回で記録するコマンドを先に示す。
             operations.insert(0, _pending_command(run, _status_id(state, "all", None, None, progress.missing)))
@@ -2839,7 +2797,7 @@ def _page_change(origin: _Run, target: _Run, slide_id: str, key: str, *, boxes: 
 
 
 def compare_previous(run: Any, *, project: Any = None) -> dict | None:
-    """前の実行（_previous_build）と、主表示ソフトの標準表示のページ画像を比べる。前の実行がなければ None。
+    """前の実行（_previous_build）と、標準表示のページ画像を比べる。前の実行がなければ None。
 
     戻り値の unchanged・renumbered（ページ番号の領域を除くと同じ）・changed・added（前の実行にないページ）は
     ページの識別子の列、removed は前の実行だけにあったページの識別子、numbers は今の実行のページ番号である。
@@ -2850,7 +2808,7 @@ def compare_previous(run: Any, *, project: Any = None) -> dict | None:
     origin = _previous_build(run, cache)
     if origin is None:
         return None
-    key = f"{_primary(target.manifest)}:standard"
+    key = "powerpoint:standard"
     result: dict[str, Any] = {
         "run": origin.path.name,
         "unchanged": [],
@@ -2896,7 +2854,6 @@ def review_sheet(
     cache: dict[Path, _Run] = {}
     state = _state(cache, run)
     manifest = state.manifest
-    primary = _primary(manifest)
     text = (slides or "pending").strip()
     if text == "pending":
         wanted = {
@@ -2919,17 +2876,17 @@ def review_sheet(
         cells: dict[str, dict] = {}
         boxes: list = []
         if origin is not None:
-            before = _visual(origin.manifest, slide_id, f"{primary}:standard")
+            before = _visual(origin.manifest, slide_id, "powerpoint:standard")
             if before is not None:
                 cells[columns[0]] = {"path": str(_artifact_path(origin.path, before["path"]))}
                 try:
-                    changes[slide_id], boxes = _page_change(origin, state, slide_id, f"{primary}:standard")
+                    changes[slide_id], boxes = _page_change(origin, state, slide_id, "powerpoint:standard")
                 except (OSError, ValueError):
                     changes[slide_id] = "changed"
             else:
                 changes[slide_id] = "added"
         for name in variants:
-            visual = _visual(manifest, slide_id, f"{primary}:{name}")
+            visual = _visual(manifest, slide_id, f"powerpoint:{name}")
             if visual is not None:
                 cells[name] = {
                     "path": str(_artifact_path(run, visual["path"])),

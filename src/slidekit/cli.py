@@ -179,9 +179,7 @@ def parser() -> argparse.ArgumentParser:
     child = add(commands, "build", "新しい実行を生成する")
     _project(child, required=True)
     _slides_option(child, "生成する" + _SLIDES_HELP + "。完成物にはできない")
-    child.add_argument(
-        "--draft", action="store_true", help="下書き（互換画像と主でない表示ソフトの変換を省く。完成物にはできない）"
-    )
+    child.add_argument("--draft", action="store_true", help="下書き（互換画像を省く。完成物にはできない）")
     child.add_argument(
         "--stop-on-error",
         action=argparse.BooleanOptionalAction,
@@ -237,9 +235,6 @@ def parser() -> argparse.ArgumentParser:
         child,
         "確認したページ（all、pending、番号・範囲・識別子のカンマ区切り）。visual と content では必須",
         check=False,
-    )
-    child.add_argument(
-        "--renderer", choices=("powerpoint", "libreoffice", "all"), help="表示ソフト（既定は主表示ソフト）"
     )
     child.add_argument(
         "--variant", default="standard", choices=("standard", "fallback", "all"), help="表示方法（既定 standard）"
@@ -304,12 +299,6 @@ def parser() -> argparse.ArgumentParser:
     ):
         child = add(actions, name, description)
         _project(child, required=False, help="実行環境を読む資料（省くと共通の実行環境だけを読む）")
-        child.add_argument(
-            "--renderer",
-            default="powerpoint",
-            choices=("powerpoint", "libreoffice"),
-            help="表示ソフト（既定 powerpoint）",
-        )
         if name == "clear":
             child.add_argument(
                 "--force",
@@ -385,8 +374,8 @@ def _run(args: argparse.Namespace, progress) -> dict:
 
         environment = load_project(args.project).environment if args.project is not None else load_common_environment()
         if args.action == "status":
-            return renderers.renderer_status(args.renderer, environment)
-        return renderers.clear_pending(args.renderer, environment, force=args.force, stop_owned=args.stop_owned)
+            return renderers.renderer_status(environment)
+        return renderers.clear_pending(environment, force=args.force, stop_owned=args.stop_owned)
     if args.action == "status":
         return records.review_status(args.build, project=args.project)
     if args.action == "record" and args.pending:
@@ -405,7 +394,6 @@ def _run(args: argparse.Namespace, progress) -> dict:
             args.slides,
             args.reviewer,
             args.note,
-            args.renderer,
             args.variant,
             status_id=args.status_id,
             project=args.project,

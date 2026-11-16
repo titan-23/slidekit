@@ -83,9 +83,6 @@ title = "照合用の資料"
 author = "slidekit example"
 last_modified_by = "slidekit example"
 
-[render]
-primary = "powerpoint"
-required = ["powerpoint"]
 
 # PowerPoint が描いた編集可能な数式を照合するので、互換画像は作らない。
 [math]

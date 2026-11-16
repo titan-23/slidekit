@@ -27,7 +27,7 @@ last_modified_by = "編集者名"
 | `theme`・`rules` | テーマと記述規則の TOML。同梱の `default`・`general` に重ねる |
 | `inputs.read_roots` | 作成 API が読む入力の範囲。既定は資料のディレクトリ |
 | `inputs.documents`・`inputs.bibliography`・`inputs.asset_dirs` | 元資料、文献ファイル、素材のディレクトリ |
-| `render.required` | 表示を確かめる表示ソフト。既定は `["powerpoint"]` |
+
 | `math.fallback` | 数式の互換画像を付けるか |
 | `deliverables` | 完成物（PPTX、PDF、発表者ノート、採用記録）の保存先 |
 | `template` | 雛形の PPTX |
@@ -326,7 +326,7 @@ table.cell("binary", "count")           # セルの要素。見出しの行キ�
 `anchor()` で文字枠・図形・表示範囲が配置領域と一致する画像の辺に結んだ端は、PowerPoint の接続になる（`center` には接続点がないので接続しない）。
 PowerPoint で接続先を動かすと、両端を接続した線は両端とも辺の中央の接続点へ移り、`gap` と `at` の位置はなくなる。
 片方だけを接続した線は、線全体が接続先と同じだけ平行に動き、`gap` と `at` の位置は保たれる（PowerPoint 16.0 の build 20430 で、図形の位置の変更で確かめた。画面でのドラッグは確かめていない）。
-互換画像を付ける資料でも、数式を含む図形に接続する。`render.required` に `libreoffice` がある資料では、`gap` 0・`at` 0.5 の端だけを接続し、互換画像を付けるときは数式を含む図形に接続しない（LibreOffice が読み込むときに接続線を引き直すおそれがあり、確かめていないため）。
+互換画像を付ける資料でも、数式を含む図形に接続する。
 
 接続した線と接続先、端が図形の辺に接する線（図形への入り込みは線幅か 2 pt の大きいほうまで）は、重なりの警告の対象にしない。
 吹き出しの接続点は本体の辺の中央である。しっぽのある辺には線を結ばない（[吹き出し](#吹き出し)）。
@@ -338,10 +338,10 @@ PowerPoint で接続先を動かすと、両端を接続した線は両端とも
 
 ```python
 # 枠線だけの補足。左の辺の上寄りにしっぽを付け、左の本文を指す
-slide.box(id="note", area=Rect(420, 150, 240, 70), text="ここで $H_e$ を更新する",
+slide.box(id="note", area=Rect(420, 150, 240, 70), text="ここで $x_i$ と比べる",
           fill="none", line_color="text", line_width_pt=1, tail_side="left", tail_at=0.2)
 # 角丸で塗りのある吹き出し。下の辺の中央から下の要素を指す
-slide.box(id="hint", area=Rect(100, 80, 200, 50), shape="rounded_rectangle", text="最下行だけを保つ",
+slide.box(id="hint", area=Rect(100, 80, 200, 50), shape="rounded_rectangle", text="要点だけを残す",
           corner_radius_pt=6, fill="surface", tail_side="bottom")
 ```
 
@@ -373,6 +373,7 @@ slide.box(id="why", area=Rect(410, 130, 220, None), text="補足", line_color="t
 ```
 
 - 辺は、点が本体の外へ出ている横と縦の距離の大きい方（等しいときは左右の辺）にする。付け根の中心は点を辺へ垂直に下ろした位置で、長さは `tail_length_pt` のまま（先端は点まで伸ばさない）。
+  付け根を角丸の弧の外へ寄せたために点が付け根の正面にないとき（点が本体の斜め外側にあるとき）は、先端を点の方へ傾ける。先端は付け根の中心と点を結ぶ直線の上に来て、傾きは辺の法線から 45° まで（先端を辺に沿って `tail_length_pt` までずらす）である。
 - `style=` かキーワード引数の `tail_side` を併用すると、辺をその値に固定する。役割の `tail_side` は `tail_toward` が上書きする。`tail_at` は併用できない。配置を少し変えると辺が切り替わる位置関係では、`tail_side` を併用する。
 - 点が本体の内側にあるときと、固定した辺の外側にないときは `invalid_geometry` になり、しっぽを付けない。まとまりの子の座標は、まとまりの左上が原点である。
 
@@ -514,12 +515,11 @@ show_master_shapes = false
 
 | 値 | 動作 |
 |---|---|
-| `auto`（既定） | `render.required` に LibreOffice がある数式の資料で付ける |
-| `required` | 数式がある資料に必ず付ける |
-| `off` | 付けない。LibreOffice を必須にする数式の資料では指定できない |
+| `required` | 数式がある資料に付ける |
+| `off`（既定） | 付けない |
 
 互換画像は PowerPoint で変換した PDF から数式の図形を切り出した画像で、PPTX の `mc:AlternateContent` の `mc:Fallback` に入る。PowerPoint は編集可能な数式を表示する。
-互換画像を付けると、次のコストがかかる。PowerPoint だけで使い、ほかのソフトで開かない資料には要らない（既定の `auto` では、LibreOffice を必須にしない資料に付けない）。
+互換画像を付けると、次のコストがかかる。PowerPoint だけで使い、ほかのソフトで開かない資料には要らない。
 
 - 変換が 2 回になる（標準表示 1 回と、数式のページだけの互換表示 1 回）。互換画像を付けない場合と比べ、使用例の生成は binary_search（互換画像 55 個）で 10.8 秒から 12.8 秒に、proposal（4 個）で 8.8 秒から 9.6 秒になった（計測した条件は [生成の流れと所要時間](#生成の流れと所要時間) と同じ）。
 - PPTX の容量が数式の数と面積に比例して増える。互換画像は数式を含む要素ごとに 1 枚で、binary_search の PPTX は 90 KB から 607 KB に増えた（画像 1 枚は 1.3〜47 KB、要素 1 個あたりの増加は平均 9.4 KB）。倍率は `math.fallback_scale`（1 pt あたりの画素数、既定 4）で決まる。
@@ -562,13 +562,13 @@ show_master_shapes = false
 | `slidekit export` | `--build RUN`（必須）、`--project P` | 最終検査に通った完成物を固定パスへ反映する |
 | `slidekit clean` | `--project P`（必須）、`--before RUN`、`--keep N`、`--failed`、`--drafts`、`--apply`（条件を 1 つ以上） | 古い実行の削除候補を示し、`--apply` で削除する |
 | `slidekit review status` | `--build RUN`（既定 `latest`）、`--project P` | 残りの確認・未対応の警告と、次の操作を示す |
-| `slidekit review record` | `--build RUN`、`--project P`、`--kind K[,K]` か `--pending`、`--slides SPEC`、`--renderer powerpoint\|libreoffice\|all`、`--variant standard\|fallback\|all`、`--status-id ID`、`--reviewer`、`--note`、`--note-visual`・`--note-overview`・`--note-content` | 画像や本文を開いて確かめた確認を記録する。`--pending` は `review status` が示した未確認をまとめて記録する |
+| `slidekit review record` | `--build RUN`、`--project P`、`--kind K[,K]` か `--pending`、`--slides SPEC`、`--variant standard\|fallback\|all`、`--status-id ID`、`--reviewer`、`--note`、`--note-visual`・`--note-overview`・`--note-content` | 画像や本文を開いて確かめた確認を記録する。`--pending` は `review status` が示した未確認をまとめて記録する |
 | `slidekit review sheet` | `--build RUN`（既定 `latest`）、`--project P`、`--slides SPEC`（既定 `pending`）、`--variant standard\|fallback\|all`、`--compare`・`--no-compare` | ページの画像を、前の実行の画像と互換表示の画像と横に並べた比較画像を作る。前の実行と差のある領域を枠で示す。確認の記録はしない |
 | `slidekit review accept` | `--build RUN`、`--project P`、`--diagnostic ID[,ID]` か `--code CODE`（`--slides SPEC`・`--element ID` で絞る）、`--reviewer`、`--reason` | 警告を理由付きで許容する |
 | `slidekit review revoke` | `--build RUN`、`--project P`、`--record ID[,ID]`、`--reviewer`、`--reason` | 確認か許容の記録を取り消す |
 | `slidekit review carry` | `--from auto\|RUN`、`--to RUN\|latest`、`--project P` | 前の実行の確認と許容を手で引き継ぐ |
-| `slidekit renderer status` | `--project P`（任意）、`--renderer powerpoint\|libreoffice` | 表示ソフトの排他・残存記録・使用中の処理と、PowerPoint の処理（slidekit が起動したものか）を示す |
-| `slidekit renderer clear` | `--project P`（任意）、`--renderer powerpoint\|libreoffice`、`--force`、`--stop-owned` | 安全を確かめてから残存記録を解除する。`--stop-owned` は slidekit が起動した PowerPoint だけを終了してから解除する |
+| `slidekit renderer status` | `--project P`（任意） | 表示ソフトの排他・残存記録・使用中の処理と、PowerPoint の処理（slidekit が起動したものか）を示す |
+| `slidekit renderer clear` | `--project P`（任意）、`--force`、`--stop-owned` | 安全を確かめてから残存記録を解除する。`--stop-owned` は slidekit が起動した PowerPoint だけを終了してから解除する |
 
 - `P` は `deck.toml` かそのディレクトリである。
 - `RUN` は実行ディレクトリのパス、番号（`12`・`0012`）、`latest`（完成物にできる最新の実行）である。番号と `latest` は `--project`（省くとカレントディレクトリの `deck.toml`）の実行保存先から探す。
@@ -623,7 +623,7 @@ show_master_shapes = false
 ### 一部のページと下書きの生成
 
 - `build --slides SPEC`：選んだページだけを書き出す。番号は資料の元のページ番号である。
-- `build --draft`：互換画像と主でない表示ソフトの変換を省く。
+- `build --draft`：互換画像を省く。
 - `--stop-on-error`：配置・記述規則・入力の検査でエラーがあれば、変換の前に止める（`status` は `stopped`）。下書きでは既定で有効で、`--no-stop-on-error` で無効にできる。
 
 部分生成と下書きの実行は、確認の記録・許容・引き継ぎ・最終検査・`export` の対象外である。完成させるときは、全ページを通常の `build` で生成する。
@@ -655,16 +655,16 @@ show_master_shapes = false
 | `environment` | 実行環境の記録 | `doctor`・`build` |
 | `doctor` | 表示ソフトの事前確認（変換待ちを含む） | `doctor`・`build` |
 | `final_form` | 最終形の PPTX の作成（互換画像を付ける資料） | `build` |
-| `render:<表示ソフト>:<表示>` | 「PowerPoint で変換（標準表示）」の形 | `build` |
+| `render:powerpoint:<表示>` | 「PowerPoint で変換（標準表示）」の形 | `build` |
 | `math_fallback` | 互換画像の作成（互換画像を付ける資料） | `build` |
 | `fallback_clone` | 互換表示の複製（互換画像を付ける資料） | `build` |
-| `close:<表示ソフト>` | 「PowerPoint の終了」の形 | `build` |
+| `close:powerpoint` | PowerPoint の終了 | `build` |
 | `pptx_check` | PPTX の検査 | `build` |
-| `pdf:<表示ソフト>:<表示>` | 「PDF の検査と画像化（PowerPoint・標準表示）」の形 | `build` |
+| `pdf:powerpoint:<表示>` | 「PDF の検査と画像化（標準表示）」の形 | `build` |
 | `collect` | 結果の集約 | `build` |
 | `record` | 生成記録の保存 | `build` |
 
-`<表示ソフト>` は `powerpoint`・`libreoffice`、`<表示>` は `standard`（標準表示）・`fallback`（互換表示）である。
+`<表示>` は `standard`（標準表示）・`fallback`（互換表示）である。
 要約の内訳は、`render:…` を「変換」、`pdf:…` を「PDF の検査と画像化」、`close:…` を「表示ソフトの終了」、`doctor` を「事前確認」、`math_fallback` と `final_form` を「互換画像」にまとめる。
 
 PowerPoint の変換は利用者ごとに 1 つずつで、生成は事前確認から最後の変換まで排他を持つ。PowerPoint を使わない処理（ページ画像と互換画像の切り出し）は、
@@ -694,11 +694,11 @@ binary_search の通常の生成の内訳は、変換 4.9 秒（標準表示 3.9
 | ファイル | 内容 |
 |---|---|
 | `deck.pptx` | 最終 PPTX |
-| `deck.pdf` | 主表示ソフトの標準表示の PDF（`renders/` の PDF へのハードリンク。できなければ複製） |
+| `deck.pdf` | 標準表示の PDF（`renders/` の PDF へのハードリンク。できなければ複製） |
 | `deck.json` | 構築した場面データ |
 | `notes.md` | 発表者ノート（「## 番号. 題名」とノートを並べる） |
 | `layout.json` | 計測の予測（要素ごとの行と寸法） |
-| `renders/<表示ソフト>/<standard\|fallback>/` | 変換した PDF、ページ画像 `slide-NNN.png`、一覧画像 `contact-NNN.png`（標準表示）、予測と実際の行の照合 `layout.json` |
+| `renders/powerpoint/<standard\|fallback>/` | 変換した PDF、ページ画像 `slide-NNN.png`、一覧画像 `contact-NNN.png`（標準表示）、予測と実際の行の照合 `layout.json` |
 | `assets/` | 配置用に変換した素材 |
 | `intermediate/` | 中間 PPTX。確認用の複製と最終形の PPTX は `--keep-intermediate` のときだけ残す |
 | `manifest.json` | 生成記録：入力・設定・環境・成果物のハッシュ値、段階と所要時間、確認の証拠 |
@@ -731,7 +731,7 @@ slidekit export --project examples/proposal/src/deck.toml --build latest
 
 - 確認の種類は、`visual`（ページの表示）、`overview`（一覧画像。ページ順・全体の配置・文書情報）、`content`（本文・ノート・出典の内容）である。`--kind visual,content` のようにまとめて指定できる。
 - `--slides` は `visual` と `content` で必須である。`all` は、その確認が要る全ページを選ぶ（互換表示では数式のあるページ）。明示したページにその確認が要らなければエラーになる。
-- `--variant` は `standard`（既定）・`fallback`（互換表示）・`all`、`--renderer` は表示ソフトか `all` である（既定は主表示ソフト）。
+- `--variant` は `standard`（既定）・`fallback`（互換表示）・`all` である。
 - 未確認のページだけを記録するときは、`review status --json` が示す照合用の値を使い `--slides pending --status-id …` と書く。
 - 画像と本文をすべて見た後は、`review record --build N --pending --status-id … --reviewer … --note …` で、`review status` が示した未確認の確認（表示・一覧画像・内容のすべての組）を 1 回で記録できる。照合用の値は `review status` の結果の `status_id`（要約の「次の操作」の先頭のコマンドにも出る）で、その後に未確認の対象が変わっていれば記録しない。種類ごとに確認内容を分けるときは `--note-visual`・`--note-overview`・`--note-content` を使う（`--note` より優先する）。
 - 記録の結果は、残っている確認と未対応の警告の件数（`remaining`）を示す。残りがなければ次の操作は `export` になる。
@@ -754,7 +754,7 @@ slidekit export --project examples/proposal/src/deck.toml --build latest
 | 参照する元資料・文献項目の変更 | 参照するページだけやり直す | 引き継ぐ | — |
 | 文書情報・依頼内容・ページ順の変更 | 引き継ぐ（一覧画像の確認で扱う） | 引き継ぐ | — |
 | 記述規則の変更 | 引き継ぐ | 引き継ぐ | その規則を使う警告だけやり直す |
-| フォント・表示ソフト・画像化の変更 | 引き継ぐ | 全ページやり直す | 計測に使う警告をやり直す |
+| フォント・PowerPoint・画像化の変更 | 引き継ぐ | 全ページやり直す | 計測に使う警告をやり直す |
 
 表示の確認の証拠はページの PPTX の部品（ノートを含まない）と表示環境である。部品のページ番号の数字は 0 に置き換えて比べるので、桁数が同じ番号の変化では証拠が変わらず、桁数が変わると変わる。
 生成記録には、ページ番号の図形を除いた証拠（`visuals` の `body_hash`）も記録する。証拠が違っても、これが一致するページは、変更前と後の番号の領域を除いて画像を比べ、差がなければ「ページ番号だけ変わったページ」として表示の確認を引き継ぐ（写しの `render_check` に `footer_only` と元の記録の証拠を残す）。
@@ -767,7 +767,7 @@ slidekit export --project examples/proposal/src/deck.toml --build latest
   それ以外の書式は生成の前に引数の誤りになる。完成物にできる実行がないときと、存在しない番号を指定したときは、生成は行い、引き継ぎの失敗として示す。
   引き継ぎに失敗しても生成は失敗にせず、終了コードも変わらない。
 - 要約の「確認の引き継ぎ」の行は、件数、引き継ぎ元の実行、ページ番号だけ変わったページの数と比べた実行（数式のページの標準表示と互換表示の 2 つの確認も 1 ページとして集計する）、候補にしなかった実行（古い形式の実行など）を示す。
-  続く行に、引き継がなかった確認の理由（表示は「ページの表示の変更」「表示環境の変更」、内容は「本文の変更」「元資料の変更（元資料の識別子）」「文献項目の変更」、どちらも「前の確認の記録がない」）と、確認の記録がある最も新しい実行との表示環境の違い（表示ソフト・パッケージ・Python・フォント・計測の版）を示す。
+  続く行に、引き継がなかった確認の理由（表示は「ページの表示の変更」「表示環境の変更」、内容は「本文の変更」「元資料の変更（元資料の識別子）」「文献項目の変更」、どちらも「前の確認の記録がない」）と、確認の記録がある最も新しい実行との表示環境の違い（PowerPoint・パッケージ・Python・フォント・計測の版）を示す。
   `review status` の未確認のページにも、理由ごとのページを添える（例：「内容 3,5-7（4 ページ。本文の変更 p.3,5、元資料の変更 p.6-7（proofs））」）。
   `--json` の結果の `carry` は `status`・`mode`・`count`・`sources`・`renumbered`・`renumbered_from`・`skipped`・`skipped_runs`・`remaining`・`pending_reasons`・`compared_run`・`environment_changes`・`notices` を持ち、`review.json` の `carry_attempts` にも残る。
 - `build` の要約は、前の完了した実行（下書きと部分生成を含む）とページ画像を比べた結果も示す（例：「前の実行 0133 との比較: 変更なし 34、ページ番号だけ変わった 1、変わった 1（p.14）」）。`--json` の結果では `comparison`。
@@ -775,7 +775,7 @@ slidekit export --project examples/proposal/src/deck.toml --build latest
 - 資料のディレクトリを実行保存先ごと移しても（何度移しても）、同じ実行保存先の実行どうしは同じ資料として扱い、確認を引き継ぐことができる。反映した実行と退避した旧版も、整理で保護され続ける（古い形式の反映の履歴は絶対パスなので、移した後は保護の理由にならない）。
   `runs/` の外へ複製した実行には記録・許容・取り消し・引き継ぎができない（検査と `review status` はできる）。
 
-`check --final` と `export` の最終検査は、成果物と入力が生成記録と一致し、エラーの診断がなく、必要な確認（全ページの内容、表示ソフトごとの標準表示、数式のページの互換表示、一覧画像）がそろい、
+`check --final` と `export` の最終検査は、成果物と入力が生成記録と一致し、エラーの診断がなく、必要な確認（全ページの内容と標準表示、数式のページの互換表示、一覧画像）がそろい、
 すべての警告が許容か宣言で対応済みであることを確かめる。画像を実際に見たか、主張が正しいかを自動で証明するものではない。
 `export` は最終検査を含み、完成物を `deliverables` の保存先へ反映し、旧版を `out/exports/<識別子>/` に退避する。
 採用記録（`deliverables.json`）と反映の履歴（`transaction.json`）のパスは資料のディレクトリからの相対パスで、反映した完成物の権限は umask に従う。
@@ -821,7 +821,7 @@ slidekit review revoke --build 1 --record r_0123456789abcdef --reviewer editor -
 - 記述規則：禁止文字、数式の候補、明示改行の禁則、発表者ノートの有無と文末。
 - PPTX：場面の通りに書き出したか（文字、書体の区切り、数式、互換画像、接続、まとまり、パッケージの参照）。
 - PDF：文字が欠けずに描かれたか、PowerPoint が書体を置き換えていないか、要素のインクが枠に収まるか、行数が予測と合うか。
-  PDF の文字と描画を、予測した要素の範囲で要素に割り当てて比べる（`renders/<表示ソフト>/<表示>/layout.json`）。割り当てられない文字は `pdf_text_unassigned`、
+  PDF の文字と描画を、予測した要素の範囲で要素に割り当てて比べる（`renders/powerpoint/<表示>/layout.json`）。割り当てられない文字は `pdf_text_unassigned`、
   描かれていない文字と数式は `pdf_text_missing` になる。インクの比べ方と許容幅は、計測の照合データで確かめた誤差に合わせてある。
 
 重なりの警告 `element_overlap` は次の場合には出ない。

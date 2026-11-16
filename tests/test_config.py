@@ -87,8 +87,8 @@ def make_template(path):
             "theme.toml: page_kinds.contents は不明なページ種別です（候補: content）",
         ),
         (
-            {"deck.toml": '\n[render]\nrequird = ["powerpoint"]\n'},
-            "deck.toml: render.requird は不明な設定です（候補: required）",
+            {"deck.toml": "\n[images]\nraster_scal = 4\n"},
+            "deck.toml: images.raster_scal は不明な設定です（候補: raster_scale）",
         ),
     ],
 )
@@ -107,7 +107,6 @@ def test_unknown_rules_and_theme_keys_name_file_key_and_candidates(tmp_path, wri
 @pytest.mark.parametrize(
     ("extra", "expected"),
     [
-        ('\n[render]\nrequird=["powerpoint"]\n', "deck.toml: render.requird は不明な設定です（候補: required）"),
         (
             '\n[math]\nfallbak="required"\n',
             "deck.toml: math.fallbak は不明な設定です（候補: fallback、fallback_scale）",
@@ -145,12 +144,12 @@ def test_problems_in_every_settings_file_are_reported_together(tmp_path, write_d
         tmp_path / "deck",
         deck='rules = "settings/rules.toml"\n' + DECK,
         theme='[colors]\nteal = "07F87"\n',
-        extra='\n[render]\nrequird = ["powerpoint"]\n',
+        extra="\n[images]\nraster_scal = 4\n",
     )
     write(root / "settings/rules.toml", 'notes_style = "desu_masu"\n')
     isolated_environment.write_text("schema_version = 1\njbos = 2\n", encoding="utf-8")
     assert lines(settings_error(root)) == [
-        "deck.toml: render.requird は不明な設定です（候補: required）",
+        "deck.toml: images.raster_scal は不明な設定です（候補: raster_scale）",
         "theme.toml: colors.teal は 6 桁の 16 進数で指定してください（値: '07F87'）",
         "settings/rules.toml: notes_style は unrestricted、polite のどれかで指定してください（値: 'desu_masu'）",
         # 資料のディレクトリの外のファイルは絶対パスで示す。
@@ -176,17 +175,17 @@ def test_toml_syntax_error_names_file(tmp_path, write_deck, isolated_environment
         tmp_path / "deck",
         deck='rules = "rules.toml"\n' + DECK,
         theme="[colors\nprimary = 1\n",
-        extra='\n[render]\nrequird = ["powerpoint"]\n',
+        extra="\n[images]\nraster_scal = 4\n",
     )
     write(root / "rules.toml", "notes_style = \n")
     found = lines(settings_error(root))
     # 読み込みに失敗したファイルがあっても、ほかのファイルの問題も合わせて報告する。
-    assert found[0] == "deck.toml: render.requird は不明な設定です（候補: required）"
+    assert found[0] == "deck.toml: images.raster_scal は不明な設定です（候補: raster_scale）"
     assert found[1].startswith("theme.toml: TOML として読めません（") and found[2].startswith(
         "rules.toml: TOML として読めません（"
     )
     assert len(found) == 3
-    write(root / "deck.toml", DECK + "[render\n")
+    write(root / "deck.toml", DECK + "[images\n")
     [message] = lines(settings_error(root))
     assert message.startswith("deck.toml: TOML として読めません（")
     write(root / "deck.toml", DECK)
@@ -199,19 +198,16 @@ def test_deck_values_and_requirements_are_checked_at_load(tmp_path, write_deck):
     root = write_deck(
         tmp_path / "deck",
         deck='schema_version = 1\nsize = { width = 960, height = 540 }\n[metadata]\ntitle = " "\n',
-        extra='[render]\nprimary = "libreoffice"\n[math]\nfallback_renderer = "libreoffice"\n'
-        '[[inputs.documents]]\nid = "outline"\npath = "outline.md"\n'
+        extra='[[inputs.documents]]\nid = "outline"\npath = "outline.md"\n'
         '[[inputs.documents]]\nid = "outline"\npath = "notes.md"\n',
     )
     assert lines(settings_error(root)) == [
         # 使われていなかった {width, height} の形は受け付けない。
         "deck.toml: size は 16:9、4:3、または [幅, 高さ]（正の数、pt）で指定してください（値: {'width': 960, 'height': 540}）",
-        "deck.toml: math.fallback_renderer は powerpoint で指定してください（互換画像は PowerPoint で作ります）（値: 'libreoffice'）",
         "deck.toml: inputs.documents の 2 番目の id outline は 1 番目と重複しています",
         "deck.toml: metadata.title を明示指定してください",
         "deck.toml: metadata.author を明示指定してください",
         "deck.toml: metadata.last_modified_by を明示指定してください",
-        "deck.toml: render.primary の libreoffice を render.required に含めてください",
     ]
 
 
@@ -357,7 +353,7 @@ path = "template.pptx"
     )
     write(base / "helper.py", "VALUE = 1\n")
     write(base / "outline.md", "# 構成\n")
-    write(base / "environment.toml", "schema_version = 1\n[renderers.powerpoint]\ntimeout = 45\n")
+    write(base / "environment.toml", "schema_version = 1\n[powerpoint]\ntimeout = 45\n")
     (base / "figures").mkdir()
     make_template(base / "template.pptx")
     child = tmp_path / "child"
@@ -376,7 +372,7 @@ path = "template.pptx"
     assert config["inputs"]["documents"] == [{"id": "outline", "path": str(base / "outline.md")}]
     assert config["template"]["path"] == str(base / "template.pptx")
     assert config["environment_override"] == str(base / "environment.toml")
-    assert project.environment["renderers"]["powerpoint"]["timeout"] == 45
+    assert project.environment["powerpoint"]["timeout"] == 45
     # 継承元は単独でも読むことができる（同じ設定を、それぞれのディレクトリを基準に解決する）。
     assert load_project(base).config["inputs"]["documents"] == config["inputs"]["documents"]
 
@@ -411,9 +407,6 @@ title = "共通の題名"
 author = "slidekit example"
 last_modified_by = "slidekit example"
 subject = "共通の主題"
-[render]
-primary = "powerpoint"
-required = ["powerpoint", "libreoffice"]
 [math]
 fallback = "required"
 functions = ["argmax"]
@@ -430,8 +423,6 @@ path = "second.md"
         deck="""extends = "../base/deck.toml"
 [metadata]
 title = "個別の題名"
-[render]
-required = ["powerpoint"]
 [math]
 functions = ["rank"]
 [[inputs.documents]]
@@ -447,7 +438,6 @@ path = "own.md"
         "last_modified_by": "slidekit example",
         "subject": "共通の主題",
     }
-    assert config["render"] == {"primary": "powerpoint", "required": ["powerpoint"]}
     assert config["math"]["fallback"] == "required" and config["math"]["functions"] == ["rank"]
     # 配列は配列ごと置き換えるので、継承元の元資料（ないファイル）は使わない。
     assert config["inputs"]["documents"] == [{"id": "own", "path": str((child / "own.md").resolve())}]
@@ -547,12 +537,12 @@ def test_extends_tracks_all_settings_files(tmp_path, write_deck):
 
 
 def test_extends_problems_name_each_file(tmp_path, write_deck):
-    base = write_deck(tmp_path / "base", deck='schema_version = 1\n[render]\nrequird = ["powerpoint"]\n')
+    base = write_deck(tmp_path / "base", deck="schema_version = 1\n[images]\nraster_scal = 4\n")
     child = tmp_path / "child"
     write(child / "deck.toml", 'extends = "../base"\nentrypont = "slides.py:build"\n[metadata]\ntitle = "個別の題名"\n')
     assert lines(settings_error(child)) == [
         "deck.toml: entrypont は不明な設定です（候補: entrypoint）",
-        f"{(base / 'deck.toml').resolve()}: render.requird は不明な設定です（候補: required）",
+        f"{(base / 'deck.toml').resolve()}: images.raster_scal は不明な設定です（候補: raster_scale）",
         "deck.toml: metadata.author を明示指定してください",
         "deck.toml: metadata.last_modified_by を明示指定してください",
     ]
@@ -563,17 +553,17 @@ def test_extends_errors_are_reported_with_other_problems(tmp_path, write_deck):
     root = write_deck(tmp_path / "deck", deck='extends = 3\nentrypont = "slides.py:build"\n' + DECK)
     typo = "deck.toml: entrypont は不明な設定です（候補: entrypoint）"
     assert lines(settings_error(root)) == [typo, "deck.toml: extends は deck.toml のパスで指定してください（値: 3）"]
-    base = write(tmp_path / "base/deck.toml", 'extends = "../missing"\n[render]\nrequird = ["powerpoint"]\n').resolve()
+    base = write(tmp_path / "base/deck.toml", 'extends = "../missing"\n[images]\nraster_scal = 4\n').resolve()
     write(root / "deck.toml", 'extends = "../base"\nentrypont = "slides.py:build"\n')
-    read_problems = [typo, f"{base}: render.requird は不明な設定です（候補: required）"]
+    read_problems = [typo, f"{base}: images.raster_scal は不明な設定です（候補: raster_scale）"]
     assert lines(settings_error(root)) == read_problems + [
         f"{base}: extends の deck.toml がありません: {(tmp_path / 'missing').resolve()}"
     ]
-    write(base, 'extends = "../deck"\n[render]\nrequird = ["powerpoint"]\n')
+    write(base, 'extends = "../deck"\n[images]\nraster_scal = 4\n')
     assert lines(settings_error(root)) == read_problems + [
         f"{base}: extends が循環しています: {(root / 'deck.toml').resolve()}"
     ]
-    write(base, "[render\n")
+    write(base, "[images\n")
     found = lines(settings_error(root))
     assert found[0] == typo and found[1].startswith(f"{base}: TOML として読めません（") and len(found) == 2
 
@@ -583,12 +573,7 @@ def test_extends_errors_are_reported_with_other_problems(tmp_path, write_deck):
 
 def test_fallback_scale_is_validated(tmp_path, write_deck):
     root = write_deck(tmp_path / "deck", deck=DECK)
-    assert load_project(root).config["math"] == {
-        "fallback": "auto",
-        "fallback_renderer": "powerpoint",
-        "fallback_scale": 4,
-        "functions": [],
-    }
+    assert load_project(root).config["math"] == {"fallback": "off", "fallback_scale": 4, "functions": []}
     for value in ("2.5", "8"):
         write_deck(root, deck=DECK, extra=f"[math]\nfallback_scale = {value}\n")
         assert load_project(root).config["math"]["fallback_scale"] == float(value)
@@ -635,9 +620,8 @@ def test_images_settings_are_validated(tmp_path, write_deck):
             'fonts."Yu Gothic UI".windows_bold_path は不明な設定です（候補: bold_path）',
         ),
         ("jbos = 2\n", "jbos は不明な設定です（候補: jobs）"),
-        ("[renderers.powerpoint]\ntimout = 30\n", "renderers.powerpoint.timout は不明な設定です（候補: timeout）"),
-        ("[renderers.powerpnt]\ntimeout = 30\n", "renderers.powerpnt は不明な設定です（候補: powerpoint）"),
-        ("[renderers.libreoffice]\nwait_seconds = 5\n", "renderers.libreoffice.wait_seconds は不明な設定です"),
+        ("[powerpoint]\ntimout = 30\n", "powerpoint.timout は不明な設定です（候補: timeout）"),
+        ("[powerpnt]\ntimeout = 30\n", "powerpnt は不明な設定です（候補: powerpoint）"),
     ],
 )
 def test_unknown_environment_settings_are_rejected(tmp_path, write_deck, isolated_environment, setting, expected):
@@ -659,13 +643,10 @@ path = "YuGothM.ttc"
 index = 1
 bold_path = "YuGothB.ttc"
 bold_index = 1
-[renderers.powerpoint]
+[powerpoint]
 powershell = "powershell.exe"
 timeout = 60
 wait_seconds = 0
-[renderers.libreoffice]
-executable = "soffice"
-timeout = 30.5
 """,
         encoding="utf-8",
     )
@@ -678,24 +659,21 @@ timeout = 30.5
         "bold_path": str(folder / "YuGothB.ttc"),
         "bold_index": 1,
     }
-    assert environment["renderers"] == {
-        "powerpoint": {"powershell": "powershell.exe", "timeout": 60, "wait_seconds": 0},
-        "libreoffice": {"executable": "soffice", "timeout": 30.5},
-    }
+    assert environment["powerpoint"] == {"powershell": "powershell.exe", "timeout": 60, "wait_seconds": 0}
 
 
 def test_environment_problems_are_collected(tmp_path, write_deck, isolated_environment):
     isolated_environment.write_text(
         'schema_version = 1\njobs = 0\nfont_directories = ["missing", "also_missing"]\n'
         '[fonts.Example]\nbold_path = "bold.ttf"\nindex = -1\n'
-        "[renderers.powerpoint]\ntimeout = 0\n",
+        "[powerpoint]\ntimeout = 0\n",
         encoding="utf-8",
     )
     folder = isolated_environment.parent
     expected = [
         f"{isolated_environment}: jobs は 1 以上の整数で指定してください（値: 0）",
         f"{isolated_environment}: fonts.Example.index は 0 以上の整数で指定してください（値: -1）",
-        f"{isolated_environment}: renderers.powerpoint.timeout は正の秒数で指定してください（値: 0）",
+        f"{isolated_environment}: powerpoint.timeout は正の秒数で指定してください（値: 0）",
         f"{isolated_environment}: font_directories のフォルダーがありません: {folder / 'missing'}",
         f"{isolated_environment}: font_directories のフォルダーがありません: {folder / 'also_missing'}",
         # 重ねた後の書体に path がなければ、その書体を書いたファイルを示す。
@@ -719,7 +697,7 @@ def test_environment_override_completes_font_after_merge(tmp_path, write_deck, i
     write(root / "local.toml", "schema_version = 1\n[fonts.Example]\nindex = 0\n")
     assert lines(settings_error(root)) == ["local.toml: fonts.Example に path を指定してください"]
     # 上書きの設定を読み込むのに失敗したときは、重ねた後の書体を確かめず、失敗の原因を示す。
-    write(root / "local.toml", 'schema_version = 1\n[fonts.Example]\npath = "regular.ttf"\n[renderers\n')
+    write(root / "local.toml", 'schema_version = 1\n[fonts.Example]\npath = "regular.ttf"\n[powerpoint\n')
     [message] = lines(settings_error(root))
     assert message.startswith("local.toml: TOML として読めません（")
     write_deck(root, deck='environment_override = "missing.toml"\n' + DECK)

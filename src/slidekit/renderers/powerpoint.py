@@ -149,10 +149,8 @@ def _read_errors(stream: Any, tail: _Tail) -> None:
         _close_quietly(stream)
 
 
-class PowerPointSession(base.RendererSession):
-    """PowerPoint の変換セッション。`renderers.open_session('powerpoint', …)` で開く。"""
-
-    name = "powerpoint"
+class PowerPointSession:
+    """PowerPoint の変換セッション。`renderers.open_session(…)` で開き、with を抜けるとき（例外を含む）に閉じる。"""
 
     def __init__(
         self,
@@ -201,7 +199,7 @@ class PowerPointSession(base.RendererSession):
         """作業プロセスを起動し、排他を取って準備完了になるまで待つ。待つ間は `waiting` の通知を on_event へ渡す。"""
         if self._state != "new":
             return
-        settings = base._settings(self.name, self.environment)
+        settings = base._settings(self.environment)
         powershell = base._executable(settings.get("powershell", "powershell.exe"))
         self.timeout = base._seconds(settings.get("timeout", 90), "制限時間", positive=True)
         wait = (
@@ -370,7 +368,7 @@ class PowerPointSession(base.RendererSession):
         with self._lock:
             if self._closed is not None:
                 return dict(self._closed)
-            result: dict[str, Any] = {"renderer": self.name, "closed": True, "detached": False, "quit": None}
+            result: dict[str, Any] = {"closed": True, "detached": False, "quit": None}
             try:
                 if self._state == "ready":
                     try:

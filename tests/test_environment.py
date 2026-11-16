@@ -170,10 +170,8 @@ def test_font_inside_output_is_rejected(tmp_path, isolated_environment, write_de
 
 @pytest.mark.parametrize("value", ["-1", '"10"', "true", "nan", "inf", "-0.5"])
 def test_wait_seconds_must_be_non_negative_seconds(tmp_path, isolated_environment, write_deck, value):
-    isolated_environment.write_text(
-        f"schema_version = 1\n[renderers.powerpoint]\nwait_seconds = {value}\n", encoding="utf-8"
-    )
-    with pytest.raises(ValueError, match="renderers.powerpoint.wait_seconds は 0 以上の秒数で指定してください"):
+    isolated_environment.write_text(f"schema_version = 1\n[powerpoint]\nwait_seconds = {value}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="powerpoint.wait_seconds は 0 以上の秒数で指定してください"):
         load_project(write_deck(tmp_path / "deck"))
 
 
@@ -185,30 +183,23 @@ def test_jobs_must_be_positive_integer(tmp_path, isolated_environment, write_dec
 
 
 def test_valid_wait_seconds_and_jobs_are_kept(tmp_path, isolated_environment, write_deck):
-    isolated_environment.write_text(
-        "schema_version = 1\njobs = 8\n[renderers.powerpoint]\nwait_seconds = 0\n", encoding="utf-8"
-    )
+    isolated_environment.write_text("schema_version = 1\njobs = 8\n[powerpoint]\nwait_seconds = 0\n", encoding="utf-8")
     environment = load_project(write_deck(tmp_path / "deck")).environment
     assert environment["jobs"] == 8
-    assert environment["renderers"]["powerpoint"] == {"powershell": "powershell.exe", "timeout": 90, "wait_seconds": 0}
-    isolated_environment.write_text(
-        "schema_version = 1\n[renderers.powerpoint]\nwait_seconds = 2.5\n", encoding="utf-8"
-    )
-    assert load_common_environment()["renderers"]["powerpoint"]["wait_seconds"] == 2.5
+    assert environment["powerpoint"] == {"powershell": "powershell.exe", "timeout": 90, "wait_seconds": 0}
+    isolated_environment.write_text("schema_version = 1\n[powerpoint]\nwait_seconds = 2.5\n", encoding="utf-8")
+    assert load_common_environment()["powerpoint"]["wait_seconds"] == 2.5
 
 
 def test_load_common_environment_reads_only_common_settings(tmp_path, monkeypatch, isolated_environment):
     folder = candidate_folder(tmp_path / "fonts")
     isolated_environment.write_text(
-        f'schema_version = 1\njobs = 3\nfont_directories = ["{folder}"]\n[renderers.powerpoint]\nwait_seconds = 5\n',
+        f'schema_version = 1\njobs = 3\nfont_directories = ["{folder}"]\n[powerpoint]\nwait_seconds = 5\n',
         encoding="utf-8",
     )
     environment = load_common_environment()
     assert environment["jobs"] == 3
-    assert environment["renderers"] == {
-        "powerpoint": {"powershell": "powershell.exe", "timeout": 90, "wait_seconds": 5},
-        "libreoffice": {"executable": "libreoffice", "timeout": 90},
-    }
+    assert environment["powerpoint"] == {"powershell": "powershell.exe", "timeout": 90, "wait_seconds": 5}
     # 資料がないので、書体は探さない。
     assert environment["fonts"] == {}
     assert [record["path"] for record in environment["config_files"]] == [str(isolated_environment)]
@@ -226,10 +217,7 @@ def test_load_common_environment_reads_only_common_settings(tmp_path, monkeypatc
     assert load_common_environment() == {
         "fonts": {},
         "config_files": [],
-        "renderers": {
-            "powerpoint": {"powershell": "powershell.exe", "timeout": 90},
-            "libreoffice": {"executable": "libreoffice", "timeout": 90},
-        },
+        "powerpoint": {"powershell": "powershell.exe", "timeout": 90},
     }
 
 

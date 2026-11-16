@@ -35,8 +35,7 @@
   数式を含む要素はグループに入れない（互換画像はスライド直下の図形だけに付けるため。グループにするかは作成 API が決める）。
 - anchor() で結んだ線の端は、`anchored_site` が接続点の番号を返すとき PowerPoint の接続（a:stCxn・a:endCxn）にする。
   端点の座標は場面の値のまま書く。数式を含む接続先も、互換画像を付ける資料で接続する（PowerPoint は mc:AlternateContent の
-  中の図形への接続を認識する。PowerPoint 16.0、build 20430 で確かめた）。ただし LibreOffice が必須で互換画像を付ける資料では、
-  数式を含む接続先を接続しない。
+  中の図形への接続を認識する。PowerPoint 16.0、build 20430 で確かめた）。
 - SVG でも埋め込む画像（vector_path がある画像）は、PNG の a:blip に SVG の拡張（asvg:svgBlip）を加える。
 - ppt/presentation.xml の p:kinsoku（日本語の行頭・行末の禁止文字）を、計測と同じ一覧（`measure.NO_LINE_START`・
   `NO_LINE_END`）で書く。雛形にあれば置き換える。
@@ -65,7 +64,6 @@ from pptx.oxml.xmlchemy import OxmlElement
 from pptx.text.text import Font
 from pptx.util import Pt
 
-from .fallback import fallback_required
 from .files import atomic_output, file_hash
 from .layout import Rect
 from .math.office_math import append_math, display_trailing_width, math_mode, math_options
@@ -429,6 +427,7 @@ def callout_geometry(element: Mapping, style: Mapping):
         width_pt=tail["width_pt"],
         length_pt=tail["length_pt"],
         corner_radius_pt=style.get("corner_radius_pt"),
+        tip_shift_pt=tail.get("tip_shift_pt", 0.0),
     )
 
 
@@ -630,7 +629,7 @@ def connection_site(target: Mapping, side: str) -> int | None:
 
     接続するのは、side が top・left・bottom・right のどれかで（center の接続点はない）、接続先が文字枠（text・equation）、
     図形（box）、表示範囲が配置領域と一致する画像のときだけである。まとまり・線・ほかの画像は接続しない（None）。
-    番号は図形自身の向きを基準にするので、回転・反転した接続先にも同じ番号を使う。LibreOffice の条件は呼び出し側が判定する。
+    番号は図形自身の向きを基準にするので、回転・反転した接続先にも同じ番号を使う。
     """
     kind = target.get("kind")
     if kind in {"text", "equation"}:
@@ -644,35 +643,16 @@ def connection_site(target: Mapping, side: str) -> int | None:
     return _CONNECTION_SITES.get(shape, {}).get(side)
 
 
-def anchored_site(reference: Mapping | None, target: Mapping | None, project) -> int | None:
-    """線の端（場面の start_ref・end_ref）を接続にするときの、接続先の接続点の番号。接続しないなら None。
+def anchored_site(reference: Mapping | None, target: Mapping | None) -> int | None:
+    """線の端（場面の start_ref・end_ref）を接続にするときの、接続先の接続点の番号（`connection_site`）。接続しないなら None。
 
-    `connection_site` の条件に加え、資料の render.required に libreoffice があるときは、次の端を接続しない。
-    LibreOffice は読み込み時に接続線を接続点へ引き直すおそれがあり、手元で確かめることができないためである。
-
-    - gap が 0 でないか at が 0.5 でない端（描いた端が接続点にない端）。
-    - 互換画像を付ける資料で、接続先が数式を含む端。互換画像の図形は数式の図形より最大 `fallback.MAX_MARGIN_PT` 広い長方形で、
-      楕円の接続点もないので、LibreOffice が互換画像の側で引き直すと端がずれる。
-
-    PowerPoint だけを使う資料では、数式を含む接続先も接続する（互換画像の mc:AlternateContent の中の図形への接続を
-    PowerPoint が認識し、開いた直後に引き直さないことを確かめた。PowerPoint 16.0、build 20430）。
+    数式を含む接続先も接続する（互換画像の mc:AlternateContent の中の図形への接続を PowerPoint が認識し、開いた直後に
+    引き直さないことを確かめた。PowerPoint 16.0、build 20430）。
     書き出しと PPTX の検査（`connection_mismatch`）が同じ判定を使う。
     """
     if not isinstance(reference, Mapping) or not isinstance(target, Mapping):
         return None
-    site = connection_site(target, reference.get("side"))
-    if site is None:
-        return None
-    config = getattr(project, "config", None) or {}
-    if "libreoffice" in ((config.get("render") or {}).get("required") or ()):
-        gap, at = reference.get("gap"), reference.get("at")
-        # 場面は既定以外のときだけ gap・at を書く（既定は gap 0、at 0.5）。
-        if (gap is not None and float(gap) != 0) or (at is not None and float(at) != 0.5):
-            return None
-        # 接続先だけのページとして、互換画像を付けるかを設定から判定する（接続先に数式がなければ偽）。
-        if fallback_required({"slides": [{"elements": [target]}]}, project):
-            return None
-    return site
+    return connection_site(target, reference.get("side"))
 
 
 def _connect(connector, key: str, shape_id: int, site: int) -> None:
@@ -683,7 +663,7 @@ def _connect(connector, key: str, shape_id: int, site: int) -> None:
     node.set("idx", str(site))
 
 
-def _connect_lines(elements: list, by_id: Mapping, drawn: Mapping, project) -> int:
+def _connect_lines(elements: list, by_id: Mapping, drawn: Mapping) -> int:
     """ページの線の端を接続にし、書いた接続の数を返す。接続先はページのどの位置にあってもよい（図形を描いた後に結ぶ）。"""
     count = 0
     for element in elements:
@@ -693,7 +673,7 @@ def _connect_lines(elements: list, by_id: Mapping, drawn: Mapping, project) -> i
         for end, key in (("start", "stCxn"), ("end", "endCxn")):
             reference = element.get(end + "_ref")
             target = by_id.get(reference.get("element_id")) if isinstance(reference, Mapping) else None
-            site = anchored_site(reference, target, project)
+            site = anchored_site(reference, target)
             shape = drawn.get(target["id"]) if target is not None else None
             if site is not None and shape is not None:
                 _connect(connector, key, shape.shape_id, site)
@@ -881,7 +861,7 @@ def write_pptx(scene, project, output: Path, *, fonts=None) -> dict:
             counts["native_math"] += len(shape._element.findall(".//" + tag("m", "oMath")))
             counts["vector_images"] += bool(element["kind"] == "image" and element.get("vector_path"))
         counts["groups"] += len(groups)
-        counts["connections"] += _connect_lines(page["elements"], by_id, drawn, project)
+        counts["connections"] += _connect_lines(page["elements"], by_id, drawn)
         slide.notes_slide.notes_text_frame.text = page.get("notes") or ""
         counts["slides"] += 1
     output = Path(output)

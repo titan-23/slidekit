@@ -28,9 +28,6 @@ author = ""
 last_modified_by = ""
 [inputs]
 read_roots = ["."]
-[render]
-primary = "powerpoint"
-required = ["powerpoint"]
 [deliverables]
 pptx = "presentation.pptx"
 pdf = "presentation.pdf"
@@ -114,7 +111,7 @@ def test_sigterm_during_render_is_recorded_like_interrupt(
 ):
     deck = write_deck(tmp_path / "deck", deck=DECK, slides=SLIDES, theme=dejavu.theme)
 
-    def terminate(name, label, source, output):
+    def terminate(label, source, output):
         signal.raise_signal(signal.SIGTERM)
 
     fake_session.on_render = terminate
@@ -131,5 +128,5 @@ def test_sigterm_during_render_is_recorded_like_interrupt(
     assert (result["build"], result["status"], result["stage"]) == (str(run), "failed", "render:powerpoint:standard")
     issues = json.loads((run / "diagnostics.json").read_text(encoding="utf-8"))["issues"]
     assert [issue["code"] for issue in issues if issue["severity"] == "error"] == ["build_interrupted"]
-    # 開いたセッションは閉じる（PowerPoint では作業プロセスを切り離し、作業プロセスが後片付けをする）。
-    assert not (run / ".building").exists() and fake_session.closed == ["powerpoint"]
+    # 開いたセッションは閉じる（作業プロセスを切り離し、作業プロセスが後片付けをする）。
+    assert not (run / ".building").exists() and fake_session.closed == 1

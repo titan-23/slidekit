@@ -44,7 +44,7 @@ def build(root, write_deck, slides):
         assert [
             issue for issue in validate_pptx(pptx, scene, project, fonts=fonts) if issue["severity"] == "error"
         ] == []
-    renderers.render_pdf(pptx, pdf, "powerpoint", {"fonts": {}})
+    renderers.render_pdf(pptx, pdf, {"fonts": {}})
     return scene, project, pdf
 
 

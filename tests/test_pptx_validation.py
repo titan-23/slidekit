@@ -38,8 +38,7 @@ def project(tmp_path):
         config={
             "metadata": {"title": "Example", "author": "", "last_modified_by": ""},
             "inputs": {"documents": [{"id": "paper"}]},
-            "render": {"required": ["powerpoint"]},
-            "math": {"fallback": "auto"},
+            "math": {"fallback": "off"},
         },
         theme={"roles": {"body": {"size_pt": 20, "min_size_pt": 18}}},
         rules={},
@@ -518,7 +517,7 @@ def test_fallback_expected_false_skips_missing_fallback(project, tmp_path):
     assert located(validate_pptx(path, data, project), "math_fallback_missing") == ["body"]
     # 下書き（互換画像を作らない）では互換画像の欠落を報告しない。
     assert validate_pptx(path, data, project, fallback_expected=False) == []
-    project.config["math"]["fallback"] = "auto"
+    project.config["math"]["fallback"] = "off"
     assert "math_fallback_missing" in codes(validate_pptx(path, data, project, fallback_expected=True))
 
 
@@ -767,24 +766,8 @@ def test_connection_mismatch_detects_wrong_site(project, tmp_path):
     assert issues[0]["observations"][0]["expected"] is None
 
 
-def test_connection_follows_libreoffice_condition(project, tmp_path):
-    # LibreOffice が必須の資料では、gap か at を変えた端は接続しない。書き出しと検査は同じ判定を使う。
-    data = scene(
-        boxed("target", (300, 40, 100, 50)),
-        connector("spaced", (100, 65), (294, 65), end_ref={"element_id": "target", "side": "left", "gap": 6}),
-    )
-    project.config["render"]["required"] = ["powerpoint", "libreoffice"]
-    path = written(tmp_path, project, data)
-    assert validate_pptx(path, data, project) == []
-    project.config["render"]["required"] = ["powerpoint"]
-    issues = validate_pptx(path, data, project)
-    assert located(issues, "connection_mismatch") == ["spaced"]
-    assert issues[0]["observations"][0]["actual"] is None
-
-
-def test_connection_to_math_follows_fallback_condition(project, tmp_path):
-    # 数式を含む接続先は、PowerPoint だけの資料では互換画像を付けても接続し、LibreOffice が必須で互換画像を付ける資料では
-    # 接続しない。書き出しと検査は同じ判定（writer.anchored_site）を使う。
+def test_connection_to_math_is_kept_with_fallback(project, tmp_path):
+    # 数式を含む接続先は、互換画像を付ける資料でも接続する。書き出しと検査は同じ判定（writer.anchored_site）を使う。
     data = scene(
         styled("formula", "equation", [math("x")], area=(300, 40, 100, 50)),
         connector("link", (100, 65), (300, 65), end_ref={"element_id": "formula", "side": "left"}),
@@ -792,12 +775,6 @@ def test_connection_to_math_follows_fallback_condition(project, tmp_path):
     project.config["math"]["fallback"] = "required"
     connected = written(tmp_path, project, data, name="connected.pptx")
     assert codes(validate_pptx(connected, data, project, fallback_expected=False)) == set()
-    project.config["render"]["required"] = ["powerpoint", "libreoffice"]
-    issues = validate_pptx(connected, data, project, fallback_expected=False)
-    assert located(issues, "connection_mismatch") == ["link"]
-    assert issues[0]["observations"][0]["expected"] is None and issues[0]["observations"][0]["actual"]["site"] == 1
-    unconnected = written(tmp_path, project, data, name="unconnected.pptx")
-    assert codes(validate_pptx(unconnected, data, project, fallback_expected=False)) == set()
 
 
 def vector_scene(tmp_path):

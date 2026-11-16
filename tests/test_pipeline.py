@@ -51,9 +51,6 @@ author = ""
 last_modified_by = ""
 [inputs]
 read_roots = ["."]
-[render]
-primary = "powerpoint"
-required = ["powerpoint"]
 [deliverables]
 pptx = "presentation.pptx"
 pdf = "presentation.pdf"
@@ -218,7 +215,7 @@ def test_layout_limits_report_to_selected_slides(local_project):
 def test_doctor_keeps_layout_diagnostics_when_preflight_fails(local_project, fake_session):
     rewrite(local_project, pages_source("first", "second", overflow=("second",)))
 
-    def busy(name, on_event):
+    def busy(on_event):
         raise RendererError("SLIDEKIT_BUSY: 同じ Windows 利用者による変換が実行中です", code="renderer_busy")
 
     fake_session.on_open = busy
@@ -227,7 +224,7 @@ def test_doctor_keeps_layout_diagnostics_when_preflight_fails(local_project, fak
     assert {"text_overflow", "renderer_busy"} <= set(codes(result))
     busy_issue = next(issue for issue in result["issues"] if issue["code"] == "renderer_busy")
     assert busy_issue["scope"] == "doctor"
-    assert result["renderers"]["powerpoint"]["status"] == "failed"
+    assert result["powerpoint"]["status"] == "failed"
 
 
 @pytest.mark.parametrize("math_page", [False, True])
@@ -242,7 +239,7 @@ def test_doctor_reports_environment_without_writing_to_project(local_project, ma
     assert not [issue for issue in result["issues"] if issue["severity"] == "error"]
     assert result["environment"]["fonts"]["fonts"]["DejaVu Sans"]["sha256"]
     assert result["environment"]["renderers"]["powerpoint"]["version"] == "fixture-1"
-    assert result["renderers"]["powerpoint"] == {"status": "passed", "version": "fixture-1", "message": None}
+    assert result["powerpoint"] == {"status": "passed", "version": "fixture-1", "message": None}
     assert sorted(local_project.rglob("*")) == before
 
 
@@ -296,16 +293,16 @@ def test_doctor_detects_fonts_only_after_passed_preflight(local_project, fake_se
     detected = []
     monkeypatch.setattr(fonts, "_detect_font_directories", lambda environment: detected.append(True) or ())
 
-    def busy(name, on_event):
+    def busy(on_event):
         raise RendererError("SLIDEKIT_BUSY: 同じ Windows 利用者による変換が実行中です", code="renderer_busy")
 
     fake_session.on_open = busy
     failed = pipeline.doctor(local_project)
-    assert failed["renderers"]["powerpoint"]["status"] == "failed"
+    assert failed["powerpoint"]["status"] == "failed"
     assert failed["environment"]["font_directories"] is None and detected == []
     fake_session.on_open = None
     passed = pipeline.doctor(local_project)
-    assert passed["renderers"]["powerpoint"]["status"] == "passed"
+    assert passed["powerpoint"]["status"] == "passed"
     assert passed["environment"]["font_directories"] == [] and detected == [True]
 
 
@@ -335,8 +332,7 @@ def test_build_uses_one_session_for_all_powerpoint_renders(local_project, fake_s
     # 互換画像の 3 つの処理は入力のハッシュ値を書き出しと変換で求めた値で受け取り、自分の出力だけを読む。
     assert sorted(hashed) == ["deck.pptx", "fallback.pptx", "final_form.pptx"]
     # PowerPoint の変換は 1 つのセッションで、標準表示 1 回と互換表示 1 回だけ（中間 PPTX は変換しない）。
-    assert [session["name"] for session in fake_session.sessions] == ["powerpoint"]
-    assert fake_session.doctors == ["powerpoint"] and fake_session.closed == ["powerpoint"]
+    assert len(fake_session.sessions) == fake_session.doctors == fake_session.closed == 1
     assert [render["label"] for render in fake_session.renders] == ["standard", "fallback"]
     holder = fake_session.sessions[0]["holder"]
     assert (holder["command"], holder["run"], holder["project"]) == (
@@ -367,7 +363,7 @@ def test_build_uses_one_session_for_all_powerpoint_renders(local_project, fake_s
     formula = next(page for page in record["slides"] if page["id"] == "formula")
     visual = formula["visuals"]["powerpoint:standard"]
     assert visual["evidence_hash"] == visual_digest(
-        parts["formula"], "powerpoint", "standard", visual["environment_hash"], render_date=DATE
+        parts["formula"], "standard", visual["environment_hash"], render_date=DATE
     )
 
 
@@ -417,10 +413,10 @@ def test_math_fallback_build_requires_fallback_review_of_math_pages_only(local_p
     assert pages["formula"]["page_parts"] == parts["formula"].to_json()
     assert parts["formula"].choice == native["formula"].choice and parts["formula"].full != native["formula"].full
     assert standard["evidence_hash"] == visual_digest(
-        parts["formula"], "powerpoint", "standard", standard["environment_hash"], render_date=DATE
+        parts["formula"], "standard", standard["environment_hash"], render_date=DATE
     )
     assert shown["evidence_hash"] == visual_digest(
-        parts["formula"], "powerpoint", "fallback", shown["environment_hash"], render_date=DATE, number=1
+        parts["formula"], "fallback", shown["environment_hash"], render_date=DATE, number=1
     )
     assert {
         target["evidence_hash"]
@@ -445,8 +441,6 @@ def test_math_fallback_build_requires_fallback_review_of_math_pages_only(local_p
                 "visual",
                 "--slides",
                 "formula",
-                "--renderer",
-                "powerpoint",
                 "--variant",
                 "fallback",
                 "--reviewer",
@@ -507,21 +501,14 @@ def test_fallback_view_renders_only_math_slides(local_project, fake_session):
     )
 
 
-def test_draft_build_skips_fallback_and_other_renderers(local_project, fake_session):
+def test_draft_build_skips_fallback(local_project, fake_session):
     rewrite(local_project, pages_source("first", "second", math=("second",)), math=True)
-    settings = local_project / "deck.toml"
-    settings.write_text(
-        settings.read_text(encoding="utf-8").replace(
-            'required = ["powerpoint"]', 'required = ["powerpoint", "libreoffice"]'
-        ),
-        encoding="utf-8",
-    )
     result = pipeline.build(local_project / "deck.toml", draft=True)
     run = Path(result["build"])
     assert result["exit_code"] == 0, result
-    assert [session["name"] for session in fake_session.sessions] == ["powerpoint"]
+    assert len(fake_session.sessions) == 1
     assert [render["label"] for render in fake_session.renders] == ["standard"]
-    assert not (run / "intermediate").exists() and not (run / "renders/libreoffice").exists()
+    assert not (run / "intermediate").exists()
     assert "math_fallback_missing" not in codes(result)
     assert (result["mode"], result["exportable"], result["fallback"]) == ("draft", False, False)
     record = manifest(run)
@@ -600,7 +587,7 @@ def test_manifest_records_timings_and_presentation_seconds(local_project):
     assert "renders/powerpoint/standard/contact-001.png" in summarize("build", result)
     assert summarize("layout", checked).startswith("配置の検査: 合格")
     assert summarize("doctor", examined).startswith("事前確認: 合格")
-    # 予測（layout.json）と、PDF の検査の予測と実際（renders/<表示ソフト>/<表示>/layout.json）を書く。
+    # 予測（layout.json）と、PDF の検査の予測と実際（renders/powerpoint/<表示>/layout.json）を書く。
     predicted = json.loads((run / "layout.json").read_text(encoding="utf-8"))
     assert [element["id"] for element in predicted["slides"][0]["elements"]] == ["body"]
     compared = json.loads((run / "renders/powerpoint/standard/layout.json").read_text(encoding="utf-8"))
@@ -880,7 +867,7 @@ def test_build_status_matches_manifest_and_counts_quality(local_project):
 def test_busy_renderer_fails_at_preflight_with_layout_diagnostics_kept(local_project, fake_session):
     rewrite(local_project, pages_source("first", overflow=("first",)))
 
-    def busy(name, on_event):
+    def busy(on_event):
         # 使用中の記録（active.json）は、Windows の作業プロセスの PID と、その処理を始めた側の情報を持つ。
         on_event(
             {
@@ -914,7 +901,7 @@ def test_busy_renderer_fails_at_preflight_with_layout_diagnostics_kept(local_pro
 
 
 def test_renderer_failure_keeps_manifest_and_diagnostics(local_project, fake_session):
-    def fail(name, label, source, output):
+    def fail(label, source, output):
         raise RendererError("表示ソフトの制限時間を超えた", code="renderer_timeout")
 
     fake_session.on_render = fail
@@ -928,14 +915,14 @@ def test_renderer_failure_keeps_manifest_and_diagnostics(local_project, fake_ses
     assert record["schema_version"] == records.SCHEMA_VERSION
     assert "renderer_timeout" in codes(result)
     # 開いたセッションは、失敗しても閉じる。
-    assert fake_session.closed == ["powerpoint"]
+    assert fake_session.closed == 1
     assert records.check_build(run)["status"] == "failed"
     assert records.export_build(run)["status"] == "failed"
     assert not (local_project / "presentation.pptx").exists()
 
 
 def test_interrupted_build_is_recorded_as_failed(local_project, fake_session):
-    def interrupt(name, label, source, output):
+    def interrupt(label, source, output):
         raise KeyboardInterrupt
 
     fake_session.on_render = interrupt
@@ -955,7 +942,7 @@ def test_interrupted_build_is_recorded_as_failed(local_project, fake_session):
     assert "build_interrupted" in codes(result, "error") and "carry" not in result
     issues = json.loads((run / "diagnostics.json").read_text(encoding="utf-8"))["issues"]
     assert [issue["code"] for issue in issues if issue["severity"] == "error"] == ["build_interrupted"]
-    assert not (run / ".building").exists() and fake_session.closed == ["powerpoint"]
+    assert not (run / ".building").exists() and fake_session.closed == 1
 
 
 def test_pdf_check_failure_names_its_stage(local_project, monkeypatch):
@@ -1099,7 +1086,7 @@ def test_layout_diagnostics_exist_before_conversion(local_project, fake_session)
     rewrite(local_project, pages_source("first", overflow=("first",)))
     seen = {}
 
-    def inspect(name):
+    def inspect():
         run = Path(fake_session.sessions[0]["holder"]["run"])
         data = json.loads((run / "diagnostics.json").read_text(encoding="utf-8"))
         seen.update(
@@ -1277,15 +1264,13 @@ def test_fallback_evidence_uses_position_in_review_copy(local_project):
     assert shown["path"] == "renders/powerpoint/fallback/slide-002.png"
     parts = pptx_pages(run / "deck.pptx")["formula"]
     assert parts.fields == ("slidenum",) and parts.number == 2
-    in_copy = visual_digest(parts, "powerpoint", "fallback", shown["environment_hash"], render_date=DATE, number=1)
+    in_copy = visual_digest(parts, "fallback", shown["environment_hash"], render_date=DATE, number=1)
     assert shown["evidence_hash"] == in_copy
-    assert in_copy != visual_digest(
-        parts, "powerpoint", "fallback", shown["environment_hash"], render_date=DATE, number=2
-    )
+    assert in_copy != visual_digest(parts, "fallback", shown["environment_hash"], render_date=DATE, number=2)
     # 標準表示は資料の中の位置のまま。
     standard = formula["visuals"]["powerpoint:standard"]
     assert standard["evidence_hash"] == visual_digest(
-        parts, "powerpoint", "standard", standard["environment_hash"], render_date=DATE, number=2
+        parts, "standard", standard["environment_hash"], render_date=DATE, number=2
     )
 
 
@@ -1355,16 +1340,13 @@ def test_real_build_review_and_export(local_project, dejavu):
         }
     }
     environment = display_environment(
-        "powerpoint",
         record["environment"]["renderers"]["powerpoint"],
         record["operations"]["render:powerpoint:standard"],
         declared,
         record["environment"]["packages"]["pypdfium2"],
     )
     assert visual["environment_hash"] == environment
-    assert visual["evidence_hash"] == visual_digest(
-        parts["intro"], "powerpoint", "standard", environment, render_date=DATE
-    )
+    assert visual["evidence_hash"] == visual_digest(parts["intro"], "standard", environment, render_date=DATE)
     contact = pixels(run / "renders/powerpoint/standard/contact-001.png")
     assert {(target["kind"], target["slide_id"]): target["evidence_hash"] for target in record["required_reviews"]} == {
         ("content", "intro"): page["content_hash"],

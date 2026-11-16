@@ -503,7 +503,7 @@ def test_wsl_font_directories_use_powershell_folders(tmp_path, monkeypatch, font
     monkeypatch.setattr(fonts, "_is_wsl", lambda: True)
     monkeypatch.setattr(renderers, "windows_context", context)
     monkeypatch.setattr(renderers, "_unix_path", lambda value: windows[value])
-    environment = {"renderers": {"powerpoint": {"powershell": "powershell.exe"}}}
+    environment = {"powerpoint": {"powershell": "powershell.exe"}}
     # システム、利用者単位の順。PowerShell への問い合わせはプロセス内で 1 回だけ。
     assert fonts.font_directories(environment) == (system, user)
     assert font_detection(environment) == (system, user)

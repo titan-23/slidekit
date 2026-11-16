@@ -788,9 +788,7 @@ DIAGNOSTICS: Mapping[str, DiagnosticSpec] = _registry(
         ),
         (
             "renderer_missing",
-            DiagnosticSpec(
-                "error", "build", "表示ソフトの実行ファイルがない", "実行環境の設定の `executable`・`powershell` を直す"
-            ),
+            DiagnosticSpec("error", "build", "表示ソフトの実行ファイルがない", "実行環境の設定の `powershell` を直す"),
         ),
         ("renderer_unavailable", DiagnosticSpec("error", "build", "表示ソフトを実行できない", "実行環境を確かめる")),
         (
@@ -799,12 +797,8 @@ DIAGNOSTICS: Mapping[str, DiagnosticSpec] = _registry(
                 "error",
                 "build",
                 "表示ソフトの設定が不正である（表形式でない、制限時間・待ち時間の値が不正）",
-                "実行環境の設定の `renderers` を直す",
+                "実行環境の設定の `powerpoint` を直す",
             ),
-        ),
-        (
-            "unsupported_renderer",
-            DiagnosticSpec("error", "build", "未対応の表示ソフトである", "`powerpoint` か `libreoffice` を指定する"),
         ),
         (
             "font_unreadable",

@@ -97,12 +97,15 @@ def tail_outline(
     width_pt: float = TAIL_WIDTH_PT,
     length_pt: float = TAIL_LENGTH_PT,
     corner_radius_pt: float | None = None,
+    tip_shift_pt: float = 0.0,
 ) -> Outline:
     """本体 area（x, y, w, h）の辺 side にしっぽを付けた吹き出しの輪郭。
 
     付け根の中心は辺の始点（左右の辺は上端、上下の辺は左端）から c = min(max(at × L, r + d/2), L − r − d/2) の位置で、
     角丸の弧にかからない位置へ寄せる（L は辺の長さ、r は角丸の半径、d は付け根の幅）。
     d が L − 2r を ε より大きく超えると `TailWidthError` にし、差が ε 以下なら c = r + d/2 にする。
+    先端は付け根の中心から辺に垂直に length_pt 離れた点を、辺に沿って tip_shift_pt だけずらした点である
+    （左右の辺は下向き、上下の辺は右向きが正。指す点へ向けるときに `tail_from_point` が決める）。
     輪郭は本体を時計回りに上辺・右辺・下辺・左辺の順にたどり、しっぽの辺では「付け根・先端・付け根」を直線で挿入する。
     直前の点との距離が ε 以下の直線は輪郭に入れない。
     """
@@ -115,6 +118,9 @@ def tail_outline(
         raise ValueError(f"しっぽの位置は 0 以上 1 以下にする: {at!r}")
     d = _positive(width_pt, "width_pt")
     length = _positive(length_pt, "length_pt")
+    if isinstance(tip_shift_pt, bool) or not isinstance(tip_shift_pt, (int, float)) or not math.isfinite(tip_shift_pt):
+        raise ValueError(f"tip_shift_pt は有限の数にする: {tip_shift_pt!r}")
+    s = float(tip_shift_pt)
     r = corner_radius(area, shape, corner_radius_pt)
     x, y, w, h = area
     edge = h if side in ("left", "right") else w
@@ -127,13 +133,13 @@ def tail_outline(
         c = min(max(at * edge, r + d / 2), edge - r - d / 2)
     # しっぽの頂点（左右の辺は上から下、上下の辺は左から右）。
     if side == "left":
-        tail = ((x, y + c - d / 2), (x - length, y + c), (x, y + c + d / 2))
+        tail = ((x, y + c - d / 2), (x - length, y + c + s), (x, y + c + d / 2))
     elif side == "right":
-        tail = ((x + w, y + c - d / 2), (x + w + length, y + c), (x + w, y + c + d / 2))
+        tail = ((x + w, y + c - d / 2), (x + w + length, y + c + s), (x + w, y + c + d / 2))
     elif side == "top":
-        tail = ((x + c - d / 2, y), (x + c, y - length), (x + c + d / 2, y))
+        tail = ((x + c - d / 2, y), (x + c + s, y - length), (x + c + d / 2, y))
     else:
-        tail = ((x + c - d / 2, y + h), (x + c, y + h + length), (x + c + d / 2, y + h))
+        tail = ((x + c - d / 2, y + h), (x + c + s, y + h + length), (x + c + d / 2, y + h))
     inserted = {side: tail if side in ("top", "right") else tuple(reversed(tail))}
 
     segments: list[tuple] = [("move", x + r, y)]
@@ -197,14 +203,23 @@ def tail_outline(
 
 
 def tail_from_point(
-    area, shape: str, point, *, side: str | None = None, corner_radius_pt=None, width_pt=TAIL_WIDTH_PT
-) -> tuple[str, float]:
-    """指す点 point から、しっぽの辺と付け根の位置（0〜1）を決める。(辺, 位置) を返す。
+    area,
+    shape: str,
+    point,
+    *,
+    side: str | None = None,
+    corner_radius_pt=None,
+    width_pt=TAIL_WIDTH_PT,
+    length_pt=TAIL_LENGTH_PT,
+) -> tuple[str, float, float]:
+    """指す点 point から、しっぽの辺と付け根の位置（0〜1）と先端のずらし（pt）を決める。(辺, 位置, ずらし) を返す。
 
     side を渡すとその辺に固定し、point がその辺の外側になければ `TailPointError` にする。渡さなければ、point が本体の外へ
     出ている距離を横と縦で求め、大きい方の辺にする（等しいときは左右の辺）。point が本体の内側なら `TailPointError` にする。
     付け根の中心は point を辺へ垂直に下ろした位置で、`tail_outline` と同じく直線部分へ寄せる（幅が収まらなければ
     `TailWidthError`）。
+    寄せたために point が付け根の正面にないときは、先端が付け根の中心から point へ向かう直線の上に来るよう、辺に沿って
+    ずらす。ずらしは ±length_pt まで（辺の法線から 45° まで）に抑える。point が付け根の正面にあればずらしは 0 である。
     """
     area = as_rect(area)
     x, y, w, h = area
@@ -228,6 +243,7 @@ def tail_from_point(
     foot = py - y if side in ("left", "right") else px - x
     r = corner_radius(area, shape, corner_radius_pt)
     d = _positive(width_pt, "width_pt")
+    length = _positive(length_pt, "length_pt")
     straight = edge - 2 * r
     if d > straight + EPSILON:
         raise TailWidthError(side, d, edge, r)
@@ -235,4 +251,8 @@ def tail_from_point(
         c = r + d / 2
     else:
         c = min(max(foot, r + d / 2), edge - r - d / 2)
-    return side, c / edge
+    # 辺から point までの距離（法線の向き）と、付け根の中心から point までの辺に沿った距離。
+    normal = {"left": x - px, "right": px - (x + w), "top": y - py, "bottom": py - (y + h)}[side]
+    along = foot - c
+    shift = 0.0 if abs(along) <= EPSILON else min(length, max(-length, length * along / normal))
+    return side, c / edge, shift

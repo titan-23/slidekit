@@ -448,23 +448,16 @@ def test_theme_and_rule_keys_are_documented():
     for name in schema.ENVIRONMENT_KEYS[""]:
         if name == "fonts":
             expected |= {f"fonts.<書体>.{key}" for key in schema.ENVIRONMENT_KEYS["fonts.*"]}
-        elif name == "renderers":
-            expected |= {
-                f"renderers.{renderer}.{key}"
-                for renderer in schema.ENVIRONMENT_KEYS["renderers"]
-                for key in schema.ENVIRONMENT_KEYS[f"renderers.{renderer}"]
-            }
+        elif name == "powerpoint":
+            expected |= {f"powerpoint.{key}" for key in schema.ENVIRONMENT_KEYS["powerpoint"]}
         else:
             expected.add(name)
     _compare(rows, expected, "実行環境の設定")
     environment, problems = config._environment_settings([])
     assert not problems
-    for renderer, settings in environment["renderers"].items():
-        for key, value in settings.items():
-            assert (
-                f"`{_toml_literal(value)}`" in rows[f"renderers.{renderer}.{key}"][2]
-            ), f"renderers.{renderer}.{key} の既定値が違う"
-    assert f"`{powerpoint.DEFAULT_WAIT_SECONDS}`" in rows["renderers.powerpoint.wait_seconds"][2]
+    for key, value in environment["powerpoint"].items():
+        assert f"`{_toml_literal(value)}`" in rows[f"powerpoint.{key}"][2], f"powerpoint.{key} の既定値が違う"
+    assert f"`{powerpoint.DEFAULT_WAIT_SECONDS}`" in rows["powerpoint.wait_seconds"][2]
     from slidekit.fonts import WINDOWS_FONT_FILES
 
     environment_section = _section(text, "実行環境（environment.toml）")
@@ -515,7 +508,7 @@ def test_deck_defaults_are_documented(tmp_path):
         "rules",
         "output_dir",
         "inputs.read_roots",
-        "render.primary",
+        "math.fallback",
         "math.fallback_scale",
         "images.raster_scale",
         "deliverables.pptx",
@@ -688,13 +681,13 @@ def test_output_example_matches_summary():
 
 
 _STAGE_CALL = re.compile(r'(?:stage|step|checked)\(\s*f?"([^"]+)"')
-_STAGE_PREFIX = re.compile(r'f"(\w+):\{')
+_STAGE_PREFIX = re.compile(r'f"(\w+):[\w:]*\{')
 
 
 def _stage_names(source_object) -> set[str]:
-    """関数かクラスが使う段階の名前。表示ソフトを含む名前（render・pdf・close）は先頭の部分にする。"""
+    """関数かクラスが使う段階の名前。`:` を含む名前（render・pdf・close）は先頭の部分にする。"""
     source = inspect.getsource(source_object)
-    names = {name.split(":")[0] if "{" in name else name for name in _STAGE_CALL.findall(source)}
+    names = {name.split(":")[0] for name in _STAGE_CALL.findall(source)}
     return names | set(_STAGE_PREFIX.findall(source))
 
 
@@ -712,7 +705,7 @@ def test_stage_table_matches_pipeline():
     _compare(stages, set(progress.STAGE_LABELS) | {"render", "pdf", "close"}, "段階の表と進捗の名前")
     for stage, name in stages.items():
         cells = rows[name]
-        shown = name.replace("<表示ソフト>", "powerpoint").replace("<表示>", "standard")
+        shown = name.replace("<表示>", "standard")
         assert progress.stage_label(shown) in cells[1], f"段階 {name} の進捗の名前が違う"
         assert _names(cells[2]) == {
             command for command, names in used.items() if stage in names
@@ -776,7 +769,7 @@ def test_carry_table_matches_evidence():
     for fields, moved in (((), False), (("slidenum",), True)):
         parts = evidence.PageParts("a", 1, "choice", "full", None, fields)
         digests = {
-            evidence.visual_digest(parts, "powerpoint", "standard", "env", render_date="2026-01-01", number=number)
+            evidence.visual_digest(parts, "standard", "env", render_date="2026-01-01", number=number)
             for number in (1, 2)
         }
         assert (len(digests) == 2) == moved, fields

@@ -1,20 +1,21 @@
 {
   "artifacts": {
     "../notes.md": "87d887489f5a1895b6e08b8a09b03fe4e8886e5415a0644d33e6204c585fde5f",
-    "../proposal.pdf": "918f82d76bc7a16c516fac0e6a49aaff2fa23eecf494a68c624e9837ccf97a3c",
-    "../proposal.pptx": "4b21c243cbe747e5532a6ef4d7884c8d8d70f91ac67853c6bd9f1bbdd3cc3902"
+    "../proposal.pdf": "f4b4bf0eb1a3afec8d7035b00b6839c4d1886a74e21d3e65600e6230d9eede36",
+    "../proposal.pptx": "6c8c6e8a2895d02c473c683d7d6ddb5a53a8b99d3b6db9a74df58816cc58bbad"
   },
-  "exported_at": "2026-10-20T12:50:58.563292+00:00",
+  "exported_at": "2026-11-16T18:16:48.440918+00:00",
   "final_check": {
-    "checked_at": "2026-10-20T12:50:58.558657+00:00",
-    "sha256": "0ab481a322bb78a30c373bf00cd87ea3cf1a8c7a2fcad4a8dbb833861dab52bf",
+    "checked_at": "2026-11-16T18:16:48.438326+00:00",
+    "sha256": "cf30ebae7d86b94adc91ebc54760e4ad09bda86fe8c593e807460f09d36d1115",
     "summary": {
       "errors": 0,
       "reviewers": [
+        "Claude",
         "Claude（AI）"
       ],
       "reviews": {
-        "carried": 9,
+        "carried": 4,
         "renumbered": 0,
         "required": 10,
         "satisfied": 10
@@ -27,10 +28,10 @@
       }
     }
   },
-  "manifest_hash": "1024a62f53ce79f08b0600e7d8858a820ea5a566e54b4f926b5182e45ea3d10b",
+  "manifest_hash": "e2aeb18176f717075d5ec07de26d1b7cad08d2757465bea70e124e69de12013a",
   "project": "deck.toml",
-  "review_hash": "a19fdd6d272b5be525158d8a02938b37df84c2ac3b4432fb7a1b06ae50689604",
-  "run": "out/runs/0015",
-  "run_id": "0015",
+  "review_hash": "9f850afa1ca296fc6019ea1c1e6f694e73adaddbc4fd7a325f0db5e422f9fbab",
+  "run": "out/runs/0017",
+  "run_id": "0017",
   "schema_version": 2
 }

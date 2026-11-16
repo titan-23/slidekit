@@ -1009,6 +1009,24 @@ def test_tail_toward_chooses_side_and_records_target(make_deck):
     assert found["below"]["tail"]["target"] == {"element_id": "body", "side": "bottom", "gap": 4}
     # 長さは tail_length_pt のまま（先端は指す点まで伸ばさない）。
     assert found["auto"]["tail"]["points"][1] == [402, 160]
+    # 点が付け根の正面にあれば、先端はずらさない（場面に tip_shift_pt を入れない）。
+    assert "tip_shift_pt" not in found["auto"]["tail"]
+    # 斜めの点では、先端を付け根の中心から点へ向かう直線の上へずらす。
+    (x0, y0), (tx, ty), (x2, y2) = found["role"]["tail"]["points"]
+    bx, by = (x0 + x2) / 2, (y0 + y2) / 2
+    assert found["role"]["tail"]["tip_shift_pt"] < 0
+    assert (ty - by) * (300 - bx) == pytest.approx((100 - by) * (tx - bx))
+    # ずらしは ±tail_length_pt（45°）まで。
+    assert found["fixed"]["tail"]["tip_shift_pt"] == pytest.approx(-8)
+    # 書き出しは場面の tail から同じ輪郭を求める。
+    from slidekit.writer import callout_geometry
+
+    for key in ("role", "fixed"):
+        outline = callout_geometry(found[key], found[key]["style"])
+        assert [value for point in outline.tail for value in point] == pytest.approx(
+            [value for point in found[key]["tail"]["points"] for value in point]
+        )
+        assert list(outline.actual_area) == pytest.approx(found[key]["actual_area"])
 
 
 def test_tail_toward_errors(make_deck):

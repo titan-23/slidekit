@@ -234,7 +234,7 @@ def _connection(properties, key: str, names: dict) -> dict | None:
     return {"element_id": names.get(node.get("id")), "shape_id": node.get("id"), "site": site}
 
 
-def _check_connections(report, element: dict, node, by_id: dict, tree: _SlideShapes, project) -> None:
+def _check_connections(report, element: dict, node, by_id: dict, tree: _SlideShapes) -> None:
     """anchor() で結んだ線の端ごとに、書き出しと同じ判定（`writer.anchored_site`）で期待する接続と、PPTX の接続を比べる。
 
     接続しない端（番号がない端、anchor() で結んでいない端）には接続がないことを求める。接続先の図形がない端は
@@ -246,7 +246,7 @@ def _check_connections(report, element: dict, node, by_id: dict, tree: _SlideSha
     for end, key in (("start", "stCxn"), ("end", "endCxn")):
         reference = element.get(end + "_ref")
         target = by_id.get(reference.get("element_id")) if isinstance(reference, dict) else None
-        site = anchored_site(reference, target, project)
+        site = anchored_site(reference, target)
         expected = None
         if site is not None:
             found = tree.shapes.get(target["id"])
@@ -720,7 +720,7 @@ def validate_pptx(
                     if element["kind"] in {"text", "equation", "box", "line", "arrow"}:
                         _check_line_style(element_report, node, element)
                     if element["kind"] in {"line", "arrow"}:
-                        _check_connections(element_report, element, node, by_id, tree, project)
+                        _check_connections(element_report, element, node, by_id, tree)
                     if element["kind"] == "image" and element.get("vector_path"):
                         _check_vector(element_report, node, element, slide_relationships, part, names)
                     if _has_math(element):

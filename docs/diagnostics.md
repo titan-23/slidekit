@@ -9,7 +9,7 @@
 | `severity` | `error`（エラー）、`warning`（警告）、`info`（参考） |
 | `slide_id`・`slide_number` | ページの識別子と番号。選んだ章だけを構築した検査と生成では、診断は `slide_number` を持たず、ページを識別子だけで示す |
 | `element_id`・`related_element_id` | 要素の識別子。重なりなどでは相手の要素も示す |
-| `scope` | 検査の段階。`input`、`layout`、`writing`、`pptx`、`pdf:<表示ソフト>:<表示方法>`、`declaration`、生成の段階名など |
+| `scope` | 検査の段階。`input`、`layout`、`writing`、`pptx`、`pdf:powerpoint:<表示方法>`、`declaration`、生成の段階名など |
 | `observations` | 実測値や候補などの根拠 |
 | `diagnostic_id` | 種類・対象・段階から決まる識別子。`review accept` に使う |
 | `evidence_hash` | 根拠のハッシュ値。警告では、その判定に使った値（記述規則の項目、要素とページの値、計測のフォント。PDF の警告ではページの表示の証拠）だけを入れる。根拠が変わると許容は失効する |
@@ -157,10 +157,9 @@
 | `renderer_timeout` | エラー | 変換か事前確認が制限時間を超えたか、作業プロセスが準備を完了しなかった | `renderer status` で状態を確かめる。続く場合は `timeout` を延ばすか、表示ソフトの状態を確かめる |
 | `renderer_interrupted` | エラー | 利用者が表示ソフトでの変換を中断した | `renderer status` で状態を確かめてから再実行する |
 | `renderer_protocol` | エラー | 変換の作業プロセスの出力（`renderer clear` の結果を含む）が不正であるか、作業プロセスが途中で終了して使用できない | `renderer status` で状態を確かめてから再実行する。続く場合は表示ソフトの状態を確かめる |
-| `renderer_missing` | エラー | 表示ソフトの実行ファイルがない | 実行環境の設定の `executable`・`powershell` を直す |
+| `renderer_missing` | エラー | 表示ソフトの実行ファイルがない | 実行環境の設定の `powershell` を直す |
 | `renderer_unavailable` | エラー | 表示ソフトを実行できない | 実行環境を確かめる |
-| `invalid_renderer` | エラー | 表示ソフトの設定が不正である（表形式でない、制限時間・待ち時間の値が不正） | 実行環境の設定の `renderers` を直す |
-| `unsupported_renderer` | エラー | 未対応の表示ソフトである | `powerpoint` か `libreoffice` を指定する |
+| `invalid_renderer` | エラー | 表示ソフトの設定が不正である（表形式でない、制限時間・待ち時間の値が不正） | 実行環境の設定の `powerpoint` を直す |
 | `font_unreadable` | エラー | フォントを読み取ることができない | 実行環境の設定の `fonts` を直す |
 | `font_missing` | エラー | フォントのファイル指定がない | 実行環境の設定の `fonts` に `path` を書く |
 | `font_family_mismatch` | エラー | 書体名とフォントの内容が一致しない | `path`・`index` を直す |

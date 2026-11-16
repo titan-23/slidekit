@@ -60,11 +60,11 @@ def test_null_stream_prints_nothing(capsys):
         progress.event("画像化")
     assert capsys.readouterr() == ("", "")
     assert progress.timings == [
-        {"stage": "pdf:powerpoint:fallback", "label": "PDF の検査と画像化（PowerPoint・互換表示）", "seconds": 1.0}
+        {"stage": "pdf:powerpoint:fallback", "label": "PDF の検査と画像化（互換表示）", "seconds": 1.0}
     ]
     assert stage_label("unknown_stage") == "unknown_stage"
     # 変換セッションを閉じる段階（自分で起動した PowerPoint の終了を待つ）。
-    assert (stage_label("close:powerpoint"), stage_label("close:other")) == ("PowerPoint の終了", "other の終了")
+    assert stage_label("close:powerpoint") == "PowerPoint の終了"
 
 
 def test_error_prints_even_when_quiet(capsys):

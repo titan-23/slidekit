@@ -127,11 +127,11 @@ def pdf_text(path):
 
 def test_real_powerpoint_renders_japanese(tmp_path):
     environment = {"fonts": {}}
-    information = renderers.doctor_renderer("powerpoint", environment)
+    information = renderers.doctor_renderer(environment)
     assert information["version"]
     source = make_pptx(tmp_path / "input.pptx", "PowerPoint による変換確認")
     target = tmp_path / "output.pdf"
-    result = renderers.render_pdf(source, target, "powerpoint", environment)
+    result = renderers.render_pdf(source, target, environment)
     assert result["renderer"] == "powerpoint"
     assert pdf_text(target) == ["PowerPoint による変換確認"]
 
@@ -139,7 +139,7 @@ def test_real_powerpoint_renders_japanese(tmp_path):
 def test_real_windows_mutex_blocks_another_call():
     with mutex_holder() as holder:
         with pytest.raises(renderers.RendererError) as error:
-            renderers.doctor_renderer("powerpoint", {"fonts": {}, "renderers": {"powerpoint": {"wait_seconds": 0}}})
+            renderers.doctor_renderer({"fonts": {}, "powerpoint": {"wait_seconds": 0}})
         assert error.value.code == "renderer_busy"
         # 確かめた直後に放させる。
         release(holder.process)
@@ -156,7 +156,7 @@ def test_real_windows_pending_marker_blocks_without_deleting_record():
         marker = state / "pending.json"
         marker.write_text(json.dumps({"run_id": "test-only"}), encoding="utf-8")
         with pytest.raises(renderers.RendererError) as error:
-            with renderers.open_session("powerpoint", {"fonts": {}}, wait_seconds=0, state_dir=state):
+            with renderers.open_session({"fonts": {}}, wait_seconds=0, state_dir=state):
                 pass
         assert error.value.code == "renderer_pending"
         assert json.loads(marker.read_text(encoding="utf-8")) == {"run_id": "test-only"}
@@ -166,12 +166,12 @@ def test_real_windows_pending_marker_blocks_without_deleting_record():
 
 def test_real_session_renders_twice_with_one_worker(tmp_path):
     environment = {"fonts": {}}
-    running_before = renderers.renderer_status("powerpoint", environment)["powerpoint_running"]
+    running_before = renderers.renderer_status(environment)["powerpoint_running"]
     # PowerShell の起動回数を確かめるため、Windows への問い合わせの記憶を消す。
     renderers._cached_windows_context.cache_clear()
     texts = ["1 回目の変換", "2 回目の変換"]
     sources = [make_pptx(tmp_path / f"input-{number}.pptx", text) for number, text in enumerate(texts, 1)]
-    with renderers.open_session("powerpoint", environment) as session:
+    with renderers.open_session(environment) as session:
         session.doctor()
         results = [
             session.render(source, tmp_path / f"output-{number}.pdf", label=f"render-{number}")
@@ -183,14 +183,14 @@ def test_real_session_renders_twice_with_one_worker(tmp_path):
     assert results[0]["run_id"] == results[1]["run_id"]
     assert [pdf_text(tmp_path / f"output-{number}.pdf") for number in (1, 2)] == [[text] for text in texts]
     # 閉じた後は排他を取ることができる。
-    status = renderers.renderer_status("powerpoint", environment)
+    status = renderers.renderer_status(environment)
     assert (status["busy"], status["pending"]) == (False, None)
     if not running_before:
         # 起動した PowerPoint は終了している（終了には少し時間がかかる）。
         deadline = time.monotonic() + 30
         while status["powerpoint_running"] and time.monotonic() < deadline:
             time.sleep(1)
-            status = renderers.renderer_status("powerpoint", environment)
+            status = renderers.renderer_status(environment)
         assert not status["powerpoint_running"]
 
 
@@ -202,7 +202,7 @@ def test_real_session_waits_for_another_holder():
         with mutex_holder(state / "active.json") as holder:
             # 待たない設定では、使用中の処理の PID と資料を示して失敗する。
             with pytest.raises(renderers.RendererError) as error:
-                with renderers.open_session("powerpoint", {"fonts": {}}, wait_seconds=0, state_dir=state):
+                with renderers.open_session({"fonts": {}}, wait_seconds=0, state_dir=state):
                     pass
             assert error.value.code == "renderer_busy"
             assert f"PID {holder.pid}" in str(error.value) and "holder-test-deck.toml" in str(error.value)
@@ -220,7 +220,6 @@ def test_real_session_waits_for_another_holder():
 
             try:
                 with renderers.open_session(
-                    "powerpoint",
                     {"fonts": {}},
                     wait_seconds=10,
                     state_dir=state,
@@ -269,24 +268,24 @@ def test_real_status_and_clear_in_isolated_state():
                 "status": "timeout",
             }
             (state / "pending.json").write_text(json.dumps(record), encoding="utf-8")
-            status = renderers.renderer_status("powerpoint", environment, state_dir=state)
+            status = renderers.renderer_status(environment, state_dir=state)
             assert (status["status"], status["exit_code"]) == ("pending", 1)
             assert status["pending"]["run_id"] == "status-test"
             assert (status["pending_process_alive"], status["staged_input_locked"]) == (False, False)
             # PowerPoint が起動していれば、開いた複製を見分けることができないので、--force のときだけ解除する
             # （起動していなければ --force なしで解除する。確かめた後に PowerPoint が終了した場合も同じ）。
-            cleared = renderers.clear_pending("powerpoint", environment, state_dir=state)
+            cleared = renderers.clear_pending(environment, state_dir=state)
             if cleared["status"] == "refused":
                 assert status["powerpoint_running"] and "--force" in cleared["reason"], cleared
                 assert cleared["exit_code"] == 1 and (state / "pending.json").exists() and work.exists()
-                cleared = renderers.clear_pending("powerpoint", environment, force=True, state_dir=state)
+                cleared = renderers.clear_pending(environment, force=True, state_dir=state)
             assert (cleared["status"], cleared["exit_code"]) == ("cleared", 0), cleared
             archived = list((state / "cleared").glob("*-pending.json"))
             assert len(archived) == 1 and cleared["archived"].endswith(archived[0].name)
             assert json.loads(archived[0].read_text(encoding="utf-8-sig"))["run_id"] == "status-test"
             assert not (state / "pending.json").exists()
             assert cleared["removed_work_dir"] is True and not work.exists()
-            nothing = renderers.clear_pending("powerpoint", environment, state_dir=state)
+            nothing = renderers.clear_pending(environment, state_dir=state)
             assert (nothing["status"], nothing["exit_code"]) == ("nothing", 0)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -301,13 +300,13 @@ import sys
 from slidekit import pipeline, renderers
 
 source, target, state, mode = sys.argv[1:5]
-environment = {'fonts': {}, 'renderers': {'powerpoint': {'timeout': 1 if mode == 'timeout' else 300}}}
+environment = {'fonts': {}, 'powerpoint': {'timeout': 1 if mode == 'timeout' else 300}}
 sessions = []
 result = {'code': None}
 try:
     # 生成と同じく、SIGTERM と SIGHUP を中断として扱う。
     with pipeline._signals_as_interrupt():
-        with renderers.open_session('powerpoint', environment, state_dir=Path(state)) as session:
+        with renderers.open_session(environment, state_dir=Path(state)) as session:
             sessions.append(session)
             session.render(Path(source), Path(target))
 except renderers.RendererError as error:
@@ -346,7 +345,7 @@ def test_real_detached_worker_cleans_up_after_python_exits(tmp_path, mode):
     import sys
 
     environment = {"fonts": {}}
-    running_before = renderers.renderer_status("powerpoint", environment)["powerpoint_running"]
+    running_before = renderers.renderer_status(environment)["powerpoint_running"]
     context = renderers.windows_context(environment)
     source = make_long_pptx(tmp_path / "long.pptx", 150)
     with tempfile.TemporaryDirectory(
@@ -386,12 +385,12 @@ def test_real_detached_worker_cleans_up_after_python_exits(tmp_path, mode):
         # 子が終わった時点では、作業プロセスがまだ変換している。
         assert (state / "pending.json").exists()
         deadline = time.monotonic() + 120
-        status = renderers.renderer_status("powerpoint", environment, state_dir=state)
+        status = renderers.renderer_status(environment, state_dir=state)
         owned = []
         while status["status"] != "idle" and time.monotonic() < deadline:
             owned += [item for item in status["powerpoint_processes"] if item["owned"]]
             time.sleep(1)
-            status = renderers.renderer_status("powerpoint", environment, state_dir=state)
+            status = renderers.renderer_status(environment, state_dir=state)
         assert status["status"] == "idle", status
         if not running_before:
             # 使用中の間は終了の対象にしない。
@@ -407,7 +406,7 @@ def test_real_detached_worker_cleans_up_after_python_exits(tmp_path, mode):
             deadline = time.monotonic() + 60
             while status["powerpoint_running"] and time.monotonic() < deadline:
                 time.sleep(1)
-                status = renderers.renderer_status("powerpoint", environment)
+                status = renderers.renderer_status(environment)
             assert not status["powerpoint_running"]
 
 
@@ -417,7 +416,7 @@ def test_real_stop_owned_stops_only_powerpoint_started_by_slidekit(tmp_path):
     from slidekit.renderers.powerpoint import PowerPointSession
 
     environment = {"fonts": {}}
-    if renderers.renderer_status("powerpoint", environment)["powerpoint_running"]:
+    if renderers.renderer_status(environment)["powerpoint_running"]:
         pytest.skip("PowerPoint が起動しているので試験しない（利用者の資料を終了しないため）")
     context = renderers.windows_context(environment)
     powershell = renderers._executable("powershell.exe")
@@ -444,17 +443,17 @@ def test_real_stop_owned_stops_only_powerpoint_started_by_slidekit(tmp_path):
                 session.close()
             if session.work_dir is not None:
                 shutil.rmtree(session.work_dir, ignore_errors=True)
-        status = renderers.renderer_status("powerpoint", environment, state_dir=state)
+        status = renderers.renderer_status(environment, state_dir=state)
         (owned,) = [item for item in status["powerpoint_processes"] if item["owned"]]
         assert (owned["record"], owned["stoppable"], owned["has_window"]) == ("active", True, False), status
         # --stop-owned がなければ終了しない。
-        assert renderers.clear_pending("powerpoint", environment, state_dir=state)["stopped_powerpoint"] == []
-        assert renderers.renderer_status("powerpoint", environment, state_dir=state)["powerpoint_running"]
-        cleared = renderers.clear_pending("powerpoint", environment, stop_owned=True, state_dir=state)
+        assert renderers.clear_pending(environment, state_dir=state)["stopped_powerpoint"] == []
+        assert renderers.renderer_status(environment, state_dir=state)["powerpoint_running"]
+        cleared = renderers.clear_pending(environment, stop_owned=True, state_dir=state)
         assert cleared["status"] == "nothing" and [item["pid"] for item in cleared["stopped_powerpoint"]] == [
             owned["pid"]
         ], cleared
-        assert not renderers.renderer_status("powerpoint", environment, state_dir=state)["powerpoint_running"]
+        assert not renderers.renderer_status(environment, state_dir=state)["powerpoint_running"]
 
 
 def test_real_windows_font_directories():

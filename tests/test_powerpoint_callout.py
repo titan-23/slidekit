@@ -84,7 +84,7 @@ def build(context):
     deck = Deck(context)
     slide = deck.slide(id="math", kind="content", title="吹き出し", notes="説明します。")
     slide.text(id="beside", area=Rect(60, 160, 222, 40), text="左の本文", align="right")
-    slide.box(id="note", area=Rect(300, 150, 260, 70), text=[Text("ここで "), Math("H_e"), Text(" を更新する")],
+    slide.box(id="note", area=Rect(300, 150, 260, 70), text=[Text("ここで "), Math("x_i"), Text(" と比べる")],
               line_color="1F2937", line_width_pt=2, tail_side="left", tail_at=0.4)
     slide.box(id="below", area=Rect(300, 300, 260, 70), shape="rounded_rectangle", corner_radius_pt=8,
               text=[Math("\\\\frac{a}{b}")], fill="FFF4D6", line_color="1F2937", tail_side="top", align="center")

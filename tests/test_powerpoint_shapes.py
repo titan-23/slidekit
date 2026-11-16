@@ -68,7 +68,7 @@ def write_and_render(project, scene, name, *, assets=False):
         result = write_pptx(scene, project, pptx, fonts=fonts)
         errors = [issue for issue in validate_pptx(pptx, scene, project, fonts=fonts) if issue["severity"] == "error"]
     assert errors == []
-    renderers.render_pdf(pptx, pdf, "powerpoint", {"fonts": {}})
+    renderers.render_pdf(pptx, pdf, {"fonts": {}})
     return result, pdf
 
 

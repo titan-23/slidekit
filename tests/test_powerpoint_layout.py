@@ -36,7 +36,7 @@ def test_real_powerpoint_wraps_like_measurement(windows_fonts_environment, tmp_p
         assert tuple(slide["id"] for slide in scene["slides"]) == WRAP_PAGES
         pptx, pdf = tmp_path / "wrap.pptx", tmp_path / "wrap.pdf"
         write_pptx(scene, project, pptx, fonts=fonts)
-        renderers.render_pdf(pptx, pdf, "powerpoint", project.environment)
+        renderers.render_pdf(pptx, pdf, project.environment)
         failures, count = [], 0
         for slide, reading in zip(scene["slides"], read_pdf(pdf, scene)):
             for element in tool.text_elements(slide):

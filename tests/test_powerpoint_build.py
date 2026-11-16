@@ -159,13 +159,13 @@ def assert_idle(project, operations):
     """
     from slidekit import renderers
 
-    status = renderers.renderer_status("powerpoint", project.environment)
+    status = renderers.renderer_status(project.environment)
     assert status["status"] == "idle", status
     if operations["powerpoint_started"]:
         deadline = time.monotonic() + 30
         while status["powerpoint_running"] and time.monotonic() < deadline:
             time.sleep(1)
-            status = renderers.renderer_status("powerpoint", project.environment)
+            status = renderers.renderer_status(project.environment)
         assert status["powerpoint_running"] is False, status
 
 
@@ -258,7 +258,7 @@ def test_real_fallback_clone_with_math_slides_only_opens(tmp_path, write_deck, w
     assert [node.get("id") for node in kept.iter(f"{{{P14}}}sldId")] == [identifiers[1]]
     assert package_problems(clone, math_scene, project) == []
     pdf = tmp_path / "sectioned-fallback.pdf"
-    with renderers.open_session("powerpoint", {**project.environment, "fonts": {}}) as session:
+    with renderers.open_session({**project.environment, "fonts": {}}) as session:
         session.render(clone, pdf, label="fallback")
     assert_idle(project, session.operations)
     with open_pdf(pdf) as document:

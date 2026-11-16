@@ -2,7 +2,7 @@
 
 問題は `Problem` の列で返し、読み込む側がまとめて 1 つの `SettingsError` にする。
 `check_settings` は 1 つのファイルの設定名と値を確かめ、`check_theme_references`・`check_rules_references` は
-合成した後の参照（色、役割、継承）を、`check_deck_requirements` は合成した後の `deck.toml` の必須の設定と設定どうしの関係を確かめる。
+合成した後の参照（色、役割、継承）を、`check_deck_requirements` は合成した後の `deck.toml` の必須の設定を確かめる。
 合成した後の検査は形の間違った値を飛ばし、同じ誤りを二重に報告しない。ファイルの有無と参照範囲は読み込む側（`config`）が確かめる。
 書式の名前と値の規則は `styles` の一覧を使い、二重に持たない。依存は標準ライブラリと `styles`・`errors` だけにする。
 """
@@ -76,7 +76,6 @@ DECK_KEYS = MappingProxyType(
             "output_dir",
             "metadata",
             "inputs",
-            "render",
             "math",
             "images",
             "deliverables",
@@ -98,8 +97,7 @@ DECK_KEYS = MappingProxyType(
         ),
         "inputs": ("read_roots", "python", "bibliography", "asset_dirs", "documents"),
         "inputs.documents": ("id", "path", "affects_content"),
-        "render": ("primary", "required"),
-        "math": ("fallback", "fallback_renderer", "fallback_scale", "functions"),
+        "math": ("fallback", "fallback_scale", "functions"),
         "images": ("raster_scale", "vector"),
         "deliverables": ("pptx", "pdf", "notes", "record"),
         "template": ("path", "layout_index", "show_master_shapes"),
@@ -110,17 +108,14 @@ DECK_LOCAL_KEYS = ("output_dir", "deliverables")
 # 必ず明示する文書情報。
 REQUIRED_METADATA = ("title", "author", "last_modified_by")
 PAGE_SIZES = ("16:9", "4:3")
-RENDERERS = ("powerpoint", "libreoffice")
-FALLBACK_MODES = ("auto", "required", "off")
+FALLBACK_MODES = ("required", "off")
 
 # 実行環境（environment.toml）の設定名。fonts.* は書体ごとの表（キーは書体名）。
 ENVIRONMENT_KEYS = MappingProxyType(
     {
-        "": ("schema_version", "jobs", "font_directories", "fonts", "renderers"),
+        "": ("schema_version", "jobs", "font_directories", "fonts", "powerpoint"),
         "fonts.*": ("path", "index", "bold_path", "bold_index"),
-        "renderers": RENDERERS,
-        "renderers.powerpoint": ("powershell", "timeout", "wait_seconds"),
-        "renderers.libreoffice": ("executable", "timeout"),
+        "powerpoint": ("powershell", "timeout", "wait_seconds"),
     }
 )
 
@@ -389,10 +384,6 @@ def _wait_seconds(value: Any) -> str | None:
 def _function_name(value: Any) -> str | None:
     # 数式の構文（math.syntax.function_names）と同じ規則。
     return None if isinstance(value, str) and re.fullmatch(r"[A-Za-z]+", value) else "は英字だけで指定してください"
-
-
-def _fallback_renderer(value: Any) -> str | None:
-    return None if value == "powerpoint" else "は powerpoint で指定してください（互換画像は PowerPoint で作ります）"
 
 
 def _fallback_scale(value: Any) -> str | None:
@@ -667,8 +658,6 @@ class _Checker:
         key = f"{table}.{name}"
         if key == "inputs.documents":
             self.documents(value)
-        elif key == "render.required":
-            self.required_renderers(value)
         elif key in _DECK_ARRAYS:
             self.array(key, value, _DECK_ARRAYS[key])
         elif table == "metadata":
@@ -709,27 +698,6 @@ class _Checker:
             if "path" in item and (problem := _local(item["path"])):
                 self.add(key, f"{at}の path {problem}{_value(item['path'])}")
 
-    def required_renderers(self, value: Any) -> None:
-        key = "render.required"
-        if not isinstance(value, (list, tuple)):
-            self.add(key, "は配列で指定してください" + _value(value))
-            return
-        if not value:
-            self.add(key, f"には {'、'.join(RENDERERS)} のうち 1 つ以上を指定してください")
-            return
-        seen = set()
-        for number, item in enumerate(value, 1):
-            if not (isinstance(item, str) and item in RENDERERS):
-                self.add(
-                    key,
-                    f"の {number} 番目は {'、'.join(RENDERERS)} のどれかで指定してください{_value(item)}",
-                    suggest(item, RENDERERS),
-                )
-            elif item in seen:
-                self.add(key, f"の {number} 番目の {item} は重複しています")
-            else:
-                seen.add(item)
-
     # 実行環境
 
     def environment(self, data: Any) -> list[Problem]:
@@ -748,7 +716,7 @@ class _Checker:
             elif name == "fonts":
                 self.font_files(value)
             elif self.table(name, value):
-                self.renderers(value)
+                self.powerpoint(value)
         return self.problems
 
     def font_directories(self, value: Any) -> None:
@@ -774,22 +742,15 @@ class _Checker:
                 else:
                     self.value(f"{key}.{name}", item, _local if name.endswith("path") else _index)
 
-    def renderers(self, value: Mapping) -> None:
-        for name, settings in value.items():
-            key = _key("renderers", name)
-            if name not in RENDERERS:
-                self.unknown("renderers", name, RENDERERS)
-                continue
-            if not self.table(key, settings):
-                continue
-            allowed = ENVIRONMENT_KEYS[key]
-            for item, setting in settings.items():
-                if item not in allowed:
-                    self.unknown(key, item, allowed)
-                else:
-                    self.value(
-                        f"{key}.{item}", setting, {"timeout": _timeout, "wait_seconds": _wait_seconds}.get(item, _text)
-                    )
+    def powerpoint(self, value: Mapping) -> None:
+        allowed = ENVIRONMENT_KEYS["powerpoint"]
+        for name, setting in value.items():
+            if name not in allowed:
+                self.unknown("powerpoint", name, allowed)
+            else:
+                self.value(
+                    f"powerpoint.{name}", setting, {"timeout": _timeout, "wait_seconds": _wait_seconds}.get(name, _text)
+                )
 
 
 # deck.toml の値の検査。表の中の項目は「表.名前」、配列は要素ごとの検査（_DECK_ARRAYS）。
@@ -802,9 +763,7 @@ _DECK_VALUES: dict[str, Callable[[Any], str | None]] = {
     "rules": _setting_file,
     "output_dir": _local,
     "environment_override": _local,
-    "render.primary": _choice(RENDERERS),
     "math.fallback": _choice(FALLBACK_MODES),
-    "math.fallback_renderer": _fallback_renderer,
     "math.fallback_scale": _fallback_scale,
     "images.raster_scale": _raster_scale,
     "images.vector": _boolean,
@@ -843,9 +802,9 @@ def check_settings(
 
 
 def check_deck_requirements(config: Mapping, *, file: str, origins: Mapping[str, str] | None = None) -> list[Problem]:
-    """合成した deck.toml の必須の設定（文書情報、雛形のパス）と、render.primary が render.required にあることを確かめる。
+    """合成した deck.toml の必須の設定（文書情報、雛形のパス）を確かめる。
 
-    origins は設定の位置（例：render.primary）から、その値を書いたファイルの表示名への対応で、extends で合成したときに渡す。
+    origins は設定の位置（例：metadata.title）から、その値を書いたファイルの表示名への対応で、extends で合成したときに渡す。
     位置にもその親の表にも対応がなければ file を示す。形の間違った値は check_settings が報告するので飛ばす。
     """
     origins = origins or {}
@@ -865,20 +824,6 @@ def check_deck_requirements(config: Mapping, *, file: str, origins: Mapping[str,
             if value is None or (name == "title" and isinstance(value, str) and not value.strip()):
                 key = f"metadata.{name}"
                 problems.append(Problem(where(key), key, "を明示指定してください"))
-    render = config.get("render", {})
-    if isinstance(render, Mapping):
-        primary, required = render.get("primary", RENDERERS[0]), render.get("required", [RENDERERS[0]])
-        if (
-            isinstance(primary, str)
-            and primary in RENDERERS
-            and isinstance(required, (list, tuple))
-            and required
-            and all(isinstance(item, str) and item in RENDERERS for item in required)
-            and primary not in required
-        ):
-            problems.append(
-                Problem(where("render.primary"), "render.primary", f"の {primary} を render.required に含めてください")
-            )
     template = config.get("template")
     if isinstance(template, Mapping) and template and "path" not in template:
         problems.append(Problem(where("template"), "template.path", "を指定してください"))

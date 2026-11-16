@@ -99,7 +99,7 @@ record = "deliverables.json"
 - テーマ（`theme.toml`）: `[colors]`（`background`・`text`・`primary`・`accent`・`muted`・`line`・`surface`）、`[fonts]`、`[margins]`、`[defaults]`・`[defaults.<種類>]`、`[roles.<名前>]`、`[page_kinds.<種別>]`。
 - 記述規則（`rules.toml`）: `require_notes = true`、`notes_style = "polite"`（ノートをです・ます調にする）、`forbidden_characters`、`[math_candidates]`（数式にすべき文字を警告する）。
 - 雛形の PPTX は `[template] path = "template.pptx"` で指定する（テーマとマスターを引き継ぐ。既存のページの内容は取り込まない）。
-- 数式の互換画像（PowerPoint 以外のソフト向け）は `[math] fallback = "required"` で付ける。既定の `auto` では LibreOffice を必須にしない資料に付けない。
+- 数式の互換画像（PowerPoint 以外のソフト向け）は `[math] fallback = "required"` で付ける。既定の `off` では付けない。
 
 ## slides.py の書き方
 

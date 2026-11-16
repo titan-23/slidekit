@@ -150,16 +150,50 @@ def test_defaults():
 
 def test_tail_from_point_chooses_the_farther_side():
     area = Rect(100, 100, 100, 50)
-    assert tail_from_point(area, "rectangle", (40, 120)) == ("left", pytest.approx(0.4))
-    assert tail_from_point(area, "rectangle", (150, 300)) == ("bottom", pytest.approx(0.5))
+    # 点が付け根の正面にあれば、先端はずらさない（3 番目の値が 0）。
+    assert tail_from_point(area, "rectangle", (40, 120)) == ("left", pytest.approx(0.4), 0.0)
+    assert tail_from_point(area, "rectangle", (150, 300)) == ("bottom", pytest.approx(0.5), 0.0)
     # 横と縦の距離が等しいときは左右の辺。
     assert tail_from_point(area, "rectangle", (90, 90))[0] == "left"
-    # 付け根は直線部分へ寄せる。
-    assert tail_from_point(area, "rectangle", (300, 0)) == ("right", pytest.approx(5 / 50))
+    # 付け根は直線部分へ寄せ、先端を点の方へずらす。ずらしは ±length_pt（45°）まで。
+    assert tail_from_point(area, "rectangle", (300, 0)) == ("right", pytest.approx(5 / 50), pytest.approx(-8))
     # 辺を固定すると、その辺の外側の点だけを受け付ける。
-    assert tail_from_point(area, "rectangle", (150, 0), side="top") == ("top", pytest.approx(0.5))
+    assert tail_from_point(area, "rectangle", (150, 0), side="top") == ("top", pytest.approx(0.5), 0.0)
     with pytest.raises(TailPointError):
         tail_from_point(area, "rectangle", (150, 120))
     with pytest.raises(TailPointError) as raised:
         tail_from_point(area, "rectangle", (150, 0), side="left")
     assert raised.value.side == "left"
+
+
+def test_tail_from_point_leans_the_tip_toward_a_diagonal_point():
+    """付け根を寄せたために点が正面にないとき、先端は付け根の中心から点へ向かう直線の上に来る。"""
+    area = Rect(100, 100, 100, 50)
+    side, at, shift = tail_from_point(area, "rectangle", (40, 100))
+    assert (side, at) == ("left", pytest.approx(0.1))
+    assert shift == pytest.approx(-8 * 5 / 60)
+    outline = tail_outline(area, "rectangle", side=side, at=at, tip_shift_pt=shift)
+    (bx, by), (tx, ty) = (100, 105), outline.tail[1]
+    assert tx == pytest.approx(92)
+    # 付け根の中心・先端・点が一直線に並ぶ。
+    assert (ty - by) * (40 - bx) == pytest.approx((100 - by) * (tx - bx))
+    # 長さを変えても、ずらしは長さに比例する。
+    assert tail_from_point(area, "rectangle", (40, 100), length_pt=16)[2] == pytest.approx(-16 * 5 / 60)
+    # 角丸では付け根が弧の外へ寄るので、ずらしもそれに合わせる。
+    radius_side, radius_at, radius_shift = tail_from_point(area, "rounded_rectangle", (40, 100), corner_radius_pt=6)
+    assert (radius_side, radius_at) == ("left", pytest.approx(11 / 50))
+    assert radius_shift == pytest.approx(-8 * 11 / 60)
+
+
+def test_tip_shift_moves_only_the_tip():
+    """先端のずらしは付け根を変えず、外接長方形と外へ出る部分は先端まで含む。"""
+    area = Rect(100, 100, 100, 50)
+    plain = tail_outline(area, "rectangle", side="top", at=0.05)
+    shifted = tail_outline(area, "rectangle", side="top", at=0.05, tip_shift_pt=-8)
+    assert shifted.tail[0] == plain.tail[0] and shifted.tail[2] == plain.tail[2]
+    assert shifted.tail[1] == (97, 92)
+    assert shifted.actual_area == Rect(97, 92, 103, 58)
+    assert shifted.outside == (("tail", Rect(97, 92, 13, 8)),)
+    assert ("line", 97, 92) in shifted.segments
+    with pytest.raises(ValueError):
+        tail_outline(area, "rectangle", side="top", tip_shift_pt=float("nan"))

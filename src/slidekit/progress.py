@@ -12,7 +12,7 @@ import threading
 import time
 from typing import Callable, Iterator, TextIO
 
-# 段階の名前（機械向け）とラベル（日本語）。表示ソフトの変換と PDF の検査は stage_label が作る。
+# 段階の名前（機械向け）とラベル（日本語）。変換と PDF の検査は stage_label が作る。
 STAGE_LABELS = {
     "construct": "構築",
     "assets": "素材の準備",
@@ -27,26 +27,22 @@ STAGE_LABELS = {
     "collect": "結果の集約",
     "record": "生成記録の保存",
 }
-RENDERER_LABELS = {"powerpoint": "PowerPoint", "libreoffice": "LibreOffice"}
 VARIANT_LABELS = {"standard": "標準表示", "fallback": "互換表示"}
 
 
 def stage_label(name: str) -> str:
-    """段階の名前のラベル。`render:{表示ソフト}:{表示}`・`pdf:{表示ソフト}:{表示}`・`close:{表示ソフト}` も扱い、
+    """段階の名前のラベル。`render:powerpoint:{表示}`・`pdf:powerpoint:{表示}`・`close:powerpoint` も扱い、
     知らない名前はそのまま返す。"""
     if name in STAGE_LABELS:
         return STAGE_LABELS[name]
     kind, _, rest = str(name).partition(":")
-    renderer, _, variant = rest.partition(":")
-    if kind == "close" and renderer:
+    if kind == "close" and rest == "powerpoint":
         # 変換セッションを閉じる（自分で起動した PowerPoint の終了を待つ）。
-        return f"{RENDERER_LABELS.get(renderer, renderer)} の終了"
-    if kind in {"render", "pdf"} and renderer:
-        renderer = RENDERER_LABELS.get(renderer, renderer)
+        return "PowerPoint の終了"
+    renderer, _, variant = rest.partition(":")
+    if kind in {"render", "pdf"} and renderer == "powerpoint" and variant:
         variant = VARIANT_LABELS.get(variant, variant)
-        if kind == "render":
-            return f"{renderer} で変換（{variant}）" if variant else f"{renderer} で変換"
-        return f"PDF の検査と画像化（{renderer}・{variant}）" if variant else f"PDF の検査と画像化（{renderer}）"
+        return f"PowerPoint で変換（{variant}）" if kind == "render" else f"PDF の検査と画像化（{variant}）"
     return str(name)
 
 

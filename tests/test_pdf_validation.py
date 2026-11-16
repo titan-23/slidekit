@@ -22,8 +22,7 @@ def project(tmp_path):
         config={
             "metadata": {"title": "Example", "author": "", "last_modified_by": ""},
             "inputs": {"documents": [{"id": "paper"}]},
-            "render": {"required": ["powerpoint"]},
-            "math": {"fallback": "auto"},
+            "math": {"fallback": "off"},
         },
         theme={"roles": {"body": {"size_pt": 20, "min_size_pt": 18}}},
         rules={},
@@ -127,8 +126,6 @@ def test_fallback_pdf_does_not_expect_rasterized_text(project, tmp_path):
     path = write_pdf(tmp_path / "fallback.pdf", [])
     assert "pdf_text_missing" in codes(validate_pdf(path, data, project, variant="standard"))
     assert "pdf_text_missing" not in codes(validate_pdf(path, data, project, variant="fallback"))
-    project.config["render"]["required"].append("libreoffice")
-    assert "pdf_text_missing" not in codes(validate_pdf(path, data, project, renderer="libreoffice"))
 
 
 def test_pdf_line_count_mismatch_is_detected(project, tmp_path):

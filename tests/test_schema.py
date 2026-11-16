@@ -409,8 +409,8 @@ def test_settings_problems_are_reported_together():
 
 
 def test_problem_text_and_long_values():
-    assert str(Problem("deck.toml", "render.requird", "は不明な設定です", ("required",))) == (
-        "deck.toml: render.requird は不明な設定です（候補: required）"
+    assert str(Problem("deck.toml", "images.raster_scal", "は不明な設定です", ("raster_scale",))) == (
+        "deck.toml: images.raster_scal は不明な設定です（候補: raster_scale）"
     )
     assert (
         str(Problem("theme.toml", "", "TOML として読めません（Invalid value）"))
@@ -432,10 +432,8 @@ def test_problem_text_and_long_values():
 def test_check_keys_reports_unknown_deck_settings():
     assert [
         str(p)
-        for p in check_keys(
-            {"requird": ["powerpoint"], "primary": "powerpoint"}, {"primary", "required"}, "render", file="deck.toml"
-        )
-    ] == ["deck.toml: render.requird は不明な設定です（候補: required）"]
+        for p in check_keys({"raster_scal": 4, "vector": True}, {"raster_scale", "vector"}, "images", file="deck.toml")
+    ] == ["deck.toml: images.raster_scal は不明な設定です（候補: raster_scale）"]
     assert [
         str(p) for p in check_keys({"entrypont": "slides.py:build"}, {"entrypoint", "size"}, "", file="deck.toml")
     ] == ["deck.toml: entrypont は不明な設定です（候補: entrypoint）"]
@@ -462,8 +460,7 @@ FULL_DECK = {
         "asset_dirs": ["figures"],
         "documents": [{"id": "outline", "path": "outline.md", "affects_content": True}],
     },
-    "render": {"primary": "powerpoint", "required": ["powerpoint", "libreoffice"]},
-    "math": {"fallback": "required", "fallback_renderer": "powerpoint", "fallback_scale": 2.5, "functions": ["argmax"]},
+    "math": {"fallback": "required", "fallback_scale": 2.5, "functions": ["argmax"]},
     "images": {"raster_scale": 4, "vector": True},
     "deliverables": {"pptx": "deck.pptx", "pdf": "deck.pdf", "notes": "notes.md", "record": "deliverables.json"},
     "template": {"path": "template.pptx", "layout_index": 6, "show_master_shapes": False},
@@ -473,10 +470,7 @@ FULL_ENVIRONMENT = {
     "jobs": 4,
     "font_directories": ["fonts"],
     "fonts": {"Yu Gothic UI": {"path": "YuGothM.ttc", "index": 1, "bold_path": "YuGothB.ttc", "bold_index": 1}},
-    "renderers": {
-        "powerpoint": {"powershell": "powershell.exe", "timeout": 90, "wait_seconds": 0},
-        "libreoffice": {"executable": "soffice", "timeout": 60.5},
-    },
+    "powerpoint": {"powershell": "powershell.exe", "timeout": 90.5, "wait_seconds": 0},
 }
 
 
@@ -491,8 +485,7 @@ def test_every_deck_and_environment_setting_has_a_check():
     assert check_deck_requirements(FULL_DECK, file="deck.toml") == []
     assert set(FULL_ENVIRONMENT) == set(ENVIRONMENT_KEYS[""])
     assert set(FULL_ENVIRONMENT["fonts"]["Yu Gothic UI"]) == set(ENVIRONMENT_KEYS["fonts.*"])
-    for name in ENVIRONMENT_KEYS["renderers"]:
-        assert set(FULL_ENVIRONMENT["renderers"][name]) == set(ENVIRONMENT_KEYS[f"renderers.{name}"])
+    assert set(FULL_ENVIRONMENT["powerpoint"]) == set(ENVIRONMENT_KEYS["powerpoint"])
     assert check_settings("environment", FULL_ENVIRONMENT, file="environment.toml") == []
 
 
@@ -500,7 +493,6 @@ def test_every_deck_and_environment_setting_has_a_check():
     ("data", "expected"),
     [
         ({"entrypont": "slides.py:build"}, "deck.toml: entrypont は不明な設定です（候補: entrypoint）"),
-        ({"render": {"requird": ["powerpoint"]}}, "deck.toml: render.requird は不明な設定です（候補: required）"),
         ({"math": {"fallbak": "auto"}}, "deck.toml: math.fallbak は不明な設定です（候補: fallback、fallback_scale）"),
         ({"images": {"raster_scal": 2}}, "deck.toml: images.raster_scal は不明な設定です（候補: raster_scale）"),
         ({"metadata": {"titel": "題名"}}, "deck.toml: metadata.titel は不明な設定です（候補: title）"),
@@ -536,28 +528,8 @@ def test_every_deck_and_environment_setting_has_a_check():
             "deck.toml: inputs.read_roots の 2 番目は空でない文字列で指定してください（値: ''）",
         ),
         (
-            {"render": {"primary": "viewer"}},
-            "deck.toml: render.primary は powerpoint、libreoffice のどれかで指定してください（値: 'viewer'）",
-        ),
-        (
-            {"render": {"required": []}},
-            "deck.toml: render.required には powerpoint、libreoffice のうち 1 つ以上を指定してください",
-        ),
-        (
-            {"render": {"required": ["powerpoint", "powerpoint"]}},
-            "deck.toml: render.required の 2 番目の powerpoint は重複しています",
-        ),
-        (
-            {"render": {"required": ["libreofice"]}},
-            "deck.toml: render.required の 1 番目は powerpoint、libreoffice のどれかで指定してください（値: 'libreofice'）（候補: libreoffice）",
-        ),
-        (
             {"math": {"fallback": "always"}},
-            "deck.toml: math.fallback は auto、required、off のどれかで指定してください（値: 'always'）",
-        ),
-        (
-            {"math": {"fallback_renderer": "libreoffice"}},
-            "deck.toml: math.fallback_renderer は powerpoint で指定してください（互換画像は PowerPoint で作ります）（値: 'libreoffice'）",
+            "deck.toml: math.fallback は required、off のどれかで指定してください（値: 'always'）",
         ),
         (
             {"math": {"fallback_scale": 1}},
@@ -613,30 +585,20 @@ def test_deck_requirements_after_merge():
     assert [str(p) for p in check_deck_requirements({"metadata": metadata}, file="deck.toml")] == [
         "deck.toml: metadata.title を明示指定してください"
     ]
-    config = {
-        "metadata": {**metadata, "title": "題名"},
-        "render": {"primary": "libreoffice"},
-        "template": {"layout_index": 6},
-    }
+    config = {"metadata": {**metadata, "title": "題名"}, "template": {"layout_index": 6}}
     assert [str(p) for p in check_deck_requirements(config, file="deck.toml")] == [
-        "deck.toml: render.primary の libreoffice を render.required に含めてください",
-        "deck.toml: template.path を指定してください",
+        "deck.toml: template.path を指定してください"
     ]
     # extends で合成したときは値を書いたファイルを示し、値がなければその表を書いたファイルか資料自身を示す。
-    origins = {
-        "render": "../base/deck.toml",
-        "render.primary": "../base/deck.toml",
-        "metadata": "deck.toml",
-        "metadata.title": "deck.toml",
-    }
-    config = {"metadata": {"title": "題名"}, "render": {"primary": "libreoffice", "required": ["powerpoint"]}}
+    origins = {"template": "../base/deck.toml", "metadata": "deck.toml", "metadata.title": "deck.toml"}
+    config = {"metadata": {"title": "題名"}, "template": {"layout_index": 6}}
     assert [str(p) for p in check_deck_requirements(config, file="deck.toml", origins=origins)] == [
         "deck.toml: metadata.author を明示指定してください",
         "deck.toml: metadata.last_modified_by を明示指定してください",
-        "../base/deck.toml: render.primary の libreoffice を render.required に含めてください",
+        "../base/deck.toml: template.path を指定してください",
     ]
     # 形の間違った値は check_settings が報告するので、ここでは飛ばす。
-    malformed = {"metadata": [], "render": {"primary": 3, "required": "powerpoint"}, "template": "template.pptx"}
+    malformed = {"metadata": [], "template": "template.pptx"}
     assert check_deck_requirements(malformed, file="deck.toml") == []
 
 
@@ -659,15 +621,12 @@ def test_deck_requirements_after_merge():
             'environment.toml: fonts."Yu Gothic UI".windows_bold_path は不明な設定です（候補: bold_path）',
         ),
         ({"jbos": 2}, "environment.toml: jbos は不明な設定です（候補: jobs）"),
-        ({"renderers": {"powerpnt": {}}}, "environment.toml: renderers.powerpnt は不明な設定です（候補: powerpoint）"),
+        ({"powerpnt": {}}, "environment.toml: powerpnt は不明な設定です（候補: powerpoint）"),
         (
-            {"renderers": {"powerpoint": {"timout": 30}}},
-            "environment.toml: renderers.powerpoint.timout は不明な設定です（候補: timeout）",
+            {"powerpoint": {"timout": 30}},
+            "environment.toml: powerpoint.timout は不明な設定です（候補: timeout）",
         ),
-        (
-            {"renderers": {"libreoffice": {"wait_seconds": 5}}},
-            "environment.toml: renderers.libreoffice.wait_seconds は不明な設定です",
-        ),
+        ({"powerpoint": []}, "environment.toml: powerpoint は表形式で指定してください（値: []）"),
         ({"schema_version": 2}, "environment.toml: schema_version は 1 で指定してください（値: 2）"),
         ({"jobs": 1.5}, "environment.toml: jobs は 1 以上の整数で指定してください（値: 1.5）"),
         (
@@ -696,16 +655,16 @@ def test_deck_requirements_after_merge():
             "environment.toml: fonts.Arial.bold_index は 0 以上の整数で指定してください（値: True）",
         ),
         (
-            {"renderers": {"powerpoint": {"timeout": 0}}},
-            "environment.toml: renderers.powerpoint.timeout は正の秒数で指定してください（値: 0）",
+            {"powerpoint": {"timeout": 0}},
+            "environment.toml: powerpoint.timeout は正の秒数で指定してください（値: 0）",
         ),
         (
-            {"renderers": {"powerpoint": {"wait_seconds": -1}}},
-            "environment.toml: renderers.powerpoint.wait_seconds は 0 以上の秒数で指定してください（値: -1）",
+            {"powerpoint": {"wait_seconds": -1}},
+            "environment.toml: powerpoint.wait_seconds は 0 以上の秒数で指定してください（値: -1）",
         ),
         (
-            {"renderers": {"libreoffice": {"executable": ""}}},
-            "environment.toml: renderers.libreoffice.executable は空でない文字列で指定してください（値: ''）",
+            {"powerpoint": {"powershell": ""}},
+            "environment.toml: powerpoint.powershell は空でない文字列で指定してください（値: ''）",
         ),
     ],
 )

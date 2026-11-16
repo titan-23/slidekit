@@ -881,13 +881,11 @@ def test_fallback_required_follows_settings_and_math():
     with_math = scene([math_element()])
     without_math = scene([element(), {"id": "old", "kind": "text", "content": "x_i"}])
 
-    def settings(fallback, renderers=("powerpoint",)):
-        return SimpleNamespace(config={"math": {"fallback": fallback}, "render": {"required": list(renderers)}})
+    def settings(fallback):
+        return SimpleNamespace(config={"math": {"fallback": fallback}})
 
     assert fallback_required(with_math, settings("required"))
-    assert fallback_required(with_math, settings("auto", ("powerpoint", "libreoffice")))
-    assert not fallback_required(with_math, settings("auto"))
-    assert not fallback_required(with_math, settings("off", ("libreoffice",)))
+    assert not fallback_required(with_math, settings("off"))
     assert not fallback_required(without_math, settings("required"))
     assert not fallback_required(with_math, SimpleNamespace(config={}))
 

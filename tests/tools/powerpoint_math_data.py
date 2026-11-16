@@ -532,7 +532,7 @@ def render(work: Path) -> tuple[Path, dict, object]:
     write_pptx(scene, project, pptx)
     pdf.unlink(missing_ok=True)
     with renderers.open_session(
-        "powerpoint", project.environment, holder={"project": "powerpoint_math_data", "command": "math data"}
+        project.environment, holder={"project": "powerpoint_math_data", "command": "math data"}
     ) as session:
         doctor = session.doctor()
         session.render(pptx, pdf, label="math data")

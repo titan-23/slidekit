@@ -79,7 +79,7 @@ def test_asset_directory_and_output_must_not_overlap(project_dir):
 def test_environment_paths_relative_to_their_settings(project_dir, monkeypatch):
     shared = project_dir.parent / "environment.toml"
     shared.write_text(
-        '[fonts.Example]\npath = "regular.ttf"\nindex = 1\n[renderers.powerpoint]\ntimeout = 60\n', encoding="utf-8"
+        '[fonts.Example]\npath = "regular.ttf"\nindex = 1\n[powerpoint]\ntimeout = 60\n', encoding="utf-8"
     )
     monkeypatch.setenv("SLIDEKIT_ENVIRONMENT", str(shared))
     (project_dir / "local").mkdir()
@@ -91,7 +91,7 @@ def test_environment_paths_relative_to_their_settings(project_dir, monkeypatch):
     font = project.environment["fonts"]["Example"]
     assert font["path"] == str(project_dir.parent / "regular.ttf")
     assert font["bold_path"] == str(project_dir / "local/bold.ttf")
-    assert project.environment["renderers"]["powerpoint"]["timeout"] == 60
+    assert project.environment["powerpoint"]["timeout"] == 60
 
 
 def test_environment_and_bundled_resources_are_tracked_outside_read_roots(project_dir, monkeypatch, dejavu):
@@ -128,7 +128,7 @@ def test_environment_and_bundled_resources_are_tracked_outside_read_roots(projec
 
 @pytest.mark.parametrize(
     "extra",
-    ['\n[render]\nrequird=["powerpoint"]\n', '\n[math]\nfallbak="required"\n', '\n[inputs]\npyton=["slides.py"]\n'],
+    ['\n[deliverable]\npptx="deck.pptx"\n', '\n[math]\nfallbak="required"\n', '\n[inputs]\npyton=["slides.py"]\n'],
 )
 def test_unknown_settings_are_not_silently_ignored(project_dir, extra):
     append(project_dir, extra)
@@ -293,17 +293,6 @@ def test_template_uses_only_blank_layout_and_is_read_only(project_dir):
     )
     with pytest.raises(ValueError, match="空白"):
         load_project(project_dir)
-
-
-def test_math_fallback_rejected_only_when_math_is_present(project_dir):
-    append(project_dir, '\n[render]\nprimary="libreoffice"\nrequired=["libreoffice"]\n[math]\nfallback="off"\n')
-    deck = Deck(load_project(project_dir))
-    slide = deck.slide(id="content")
-    slide.text(id="text", text="文章", area=slide.content)
-    deck.to_dict()
-    slide.equation(id="math", expression="x", area=slide.content)
-    with pytest.raises(ValueError, match="互換画像"):
-        deck.to_dict()
 
 
 def test_rect_split_align_distribute_and_fit():

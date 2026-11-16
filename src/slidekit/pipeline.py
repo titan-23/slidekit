@@ -241,17 +241,6 @@ def _font_directories(project, *, detect: bool) -> list[str] | None:
     return [str(folder) for folder in font_files.font_directories(project.environment)]
 
 
-def _renderer_names(project, scene, *, draft: bool) -> list[str]:
-    """事前確認と変換に使う表示ソフト。下書きは主の表示ソフトだけ、互換画像を作るなら PowerPoint を含める。"""
-    render = project.config["render"]
-    if draft:
-        return [render["primary"]]
-    names = list(render["required"])
-    if fallback_required(scene, project) and "powerpoint" not in names:
-        names.append("powerpoint")
-    return names
-
-
 def _holder(project, command: str, run: Path | None) -> dict:
     """変換を待つ側に見せる、この処理の情報。"""
     return {
@@ -532,7 +521,7 @@ def doctor(path, *, wait_seconds=None, progress=None) -> dict:
     progress = Progress(None) if progress is None else progress
     project = load_project(path)
     _check_output_locations(project)
-    scene, issues, environment, reports, exit_code = None, [], {}, {}, 0
+    scene, issues, environment, report, exit_code = None, [], {}, None, 0
     where = {"stage": "construct"}
     try:
         scene, issues, _ = _inspect(project, None, progress, where)
@@ -541,27 +530,24 @@ def doctor(path, *, wait_seconds=None, progress=None) -> dict:
             runtime, environment = _environment(project, project.fonts)
         where["stage"] = "doctor"
         with progress.stage("doctor"):
-            for name in _renderer_names(project, scene, draft=False):
-                try:
-                    with open_session(
-                        name,
-                        runtime,
-                        wait_seconds=wait_seconds,
-                        holder=_holder(project, "doctor", None),
-                        on_event=_on_event(progress),
-                    ) as session:
-                        detected = session.doctor()
-                except RendererError as error:
-                    issues.append(failure_diagnostic(error, stage="doctor", project=project))
-                    reports[name] = {"status": "failed", "version": None, "message": str(error)}
-                    exit_code = 2
-                    continue
-                environment["renderers"][name] = detected
-                reports[name] = {"status": "passed", "version": detected.get("version"), "message": None}
-        # 自動探索は、PowerPoint の事前確認が通り Windows への問い合わせを記憶しているときだけ行う。
+            try:
+                with open_session(
+                    runtime,
+                    wait_seconds=wait_seconds,
+                    holder=_holder(project, "doctor", None),
+                    on_event=_on_event(progress),
+                ) as session:
+                    detected = session.doctor()
+            except RendererError as error:
+                issues.append(failure_diagnostic(error, stage="doctor", project=project))
+                report = {"status": "failed", "version": None, "message": str(error)}
+                exit_code = 2
+            else:
+                environment["renderers"]["powerpoint"] = detected
+                report = {"status": "passed", "version": detected.get("version"), "message": None}
+        # 自動探索は、事前確認が通り Windows への問い合わせを記憶しているときだけ行う。
         # 事前確認に失敗したセッションでは記憶がないことがあり、探すと PowerShell を新たに起動するため。
-        passed = reports.get("powerpoint", {}).get("status") == "passed"
-        environment["font_directories"] = _font_directories(project, detect=passed)
+        environment["font_directories"] = _font_directories(project, detect=report["status"] == "passed")
     except Exception as error:
         progress.error(_traceback_text(error))
         issues.append(failure_diagnostic(error, stage=where["stage"], project=project))
@@ -579,7 +565,7 @@ def doctor(path, *, wait_seconds=None, progress=None) -> dict:
         "slides": len(scene["slides"]) if scene else 0,
         "fallback_required": bool(scene) and fallback_required(scene, project),
         "environment": environment,
-        "renderers": reports,
+        "powerpoint": report,
         "counts": counts,
         "issues": issues,
         "timings": progress.timings,
@@ -773,7 +759,7 @@ class _Build:
         self.requirements: list[dict] = []
         self.deck_hash = None
         self.fallback = False
-        self.sessions: dict = {}
+        self.session = None
         self.images: dict = {}
         self.workers = None
         self.declared: dict = {}
@@ -873,7 +859,7 @@ class _Build:
                 # powershell_launches は、そのセッションが起動した PowerShell の数である（作業プロセスと、セッションの中で
                 # 初めて行った Windows への問い合わせ）。フォントの自動探索などで先に問い合わせた生成では、プロセス全体で
                 # 2 回起動しても 1 になる。
-                self.operations["sessions"] = {name: session.operations for name, session in self.sessions.items()}
+                self.operations["sessions"] = {} if self.session is None else {"powerpoint": self.session.operations}
         with self.step("collect"):
             self.collect()
         self.status, self.stage = "built", "complete"
@@ -884,47 +870,36 @@ class _Build:
         PowerPoint の変換は 1 つのセッション（排他を保持する）で行い、最後の変換の後に閉じる。検査と画像化は、すべての変換の後に、
         変換の順に行う（変換を待つ間に別のスレッドで進める方式は、短縮が 2 秒に満たなかったので採らない）。
         """
-        project, run, scene = self.project, self.run, self.scene
-        deck = run / "deck.pptx"
-        render = project.config["render"]
-        # 標準表示の確認を求める表示ソフト。
-        viewed = [render["primary"]] if self.draft else list(render["required"])
-        # 変換した PDF（表示ソフト、表示方法、PDF、変換の結果、生成した日、確認用複製に残したページ）。
-        rendered: list[tuple] = []
+        project, run = self.project, self.run
         with self.step("doctor"):
-            for name in _renderer_names(project, scene, draft=self.draft):
-                session = stack.enter_context(
-                    open_session(
-                        name,
-                        self.runtime,
-                        wait_seconds=self.wait_seconds,
-                        holder=_holder(project, "build", run),
-                        on_event=_on_event(self.progress),
-                    )
+            self.session = stack.enter_context(
+                open_session(
+                    self.runtime,
+                    wait_seconds=self.wait_seconds,
+                    holder=_holder(project, "build", run),
+                    on_event=_on_event(self.progress),
                 )
-                self.sessions[name] = session
-                self.environment["renderers"][name] = session.doctor()
-            if "powerpoint" in self.sessions:
-                # セッションを開くことができたので Windows への問い合わせを記憶している（探しても PowerShell の起動は増えない）。
-                self.environment["font_directories"] = _font_directories(project, detect=True)
+            )
+            self.environment["renderers"]["powerpoint"] = self.session.doctor()
+            # セッションを開くことができたので Windows への問い合わせを記憶している（探しても PowerShell の起動は増えない）。
+            self.environment["font_directories"] = _font_directories(project, detect=True)
         if self.fallback:
-            rendered.extend(self.convert_with_fallback(viewed))
-        # PowerPoint を先に変換し、排他を早く解放する。
-        for name in sorted(viewed, key=lambda renderer: renderer != "powerpoint"):
-            if self.fallback and name == "powerpoint":
-                continue
-            pdf = run / "renders" / name / "standard" / "deck.pdf"
-            result, date = self.render(name, "standard", deck, pdf)
-            if name == "powerpoint":
-                # 最後の PowerPoint の変換の後に排他を解放する（以後の検査・画像化・他の表示ソフトは排他の外で行う）。
-                self.close_session(name)
-            rendered.append((name, "standard", pdf, result, date, None))
+            rendered = self.convert_with_fallback()
+        else:
+            pdf = run / "renders/powerpoint/standard/deck.pdf"
+            result, date = self.render("standard", run / "deck.pptx", pdf)
+            # 最後の変換の後に排他を解放する（以後の検査・画像化は排他の外で行う）。
+            self.close_session()
+            rendered = [("standard", pdf, result, date, None)]
         self.checked("pptx_check", self.check_pptx)
-        for name, variant, pdf, result, date, kept in rendered:
-            self.checked(f"pdf:{name}:{variant}", self.process_pdf, name, variant, pdf, result, date, kept)
+        for variant, pdf, result, date, kept in rendered:
+            self.checked(f"pdf:powerpoint:{variant}", self.process_pdf, variant, pdf, result, date, kept)
 
-    def convert_with_fallback(self, viewed: list[str]) -> list[tuple]:
-        """互換画像を付ける資料の PowerPoint の変換（標準表示 1 回、互換表示 1 回）。検査する PDF の列を返す（convert の rendered の形）。"""
+    def convert_with_fallback(self) -> list[tuple]:
+        """互換画像を付ける資料の変換（標準表示 1 回、互換表示 1 回）。
+
+        検査する PDF の列（表示方法、PDF、変換の結果、生成した日、確認用複製に残したページ）を返す。
+        """
         project, run = self.project, self.run
         deck, native = run / "deck.pptx", run / "intermediate/native.pptx"
         final_form = run / "intermediate/final_form.pptx"
@@ -935,13 +910,8 @@ class _Build:
                 native, final_form, scale=scale, source_sha256=self.hashes.get("intermediate/native.pptx")
             )
             self.hashes["intermediate/final_form.pptx"] = prepared["sha256"]
-        # PowerPoint の標準表示の確認を求めないとき（LibreOffice だけを必須にした資料）は、互換画像の元としてだけ残す。
-        standard = (
-            run / "renders/powerpoint/standard/deck.pdf"
-            if "powerpoint" in viewed
-            else run / "intermediate/final_form.pdf"
-        )
-        standard_result, standard_date = self.render("powerpoint", "standard", final_form, standard)
+        standard = run / "renders/powerpoint/standard/deck.pdf"
+        standard_result, standard_date = self.render("standard", final_form, standard)
         with self.step("math_fallback"):
             self.hashes.pop("deck.pptx", None)
             finalized = finalize_math(
@@ -983,27 +953,24 @@ class _Build:
             }
             self.hashes["intermediate/fallback.pptx"] = self.operations["fallback_clone"]["sha256"]
         pdf = run / "renders/powerpoint/fallback/deck.pdf"
-        result, date = self.render("powerpoint", "fallback", clone, pdf)
-        self.close_session("powerpoint")
-        rendered = (
-            [("powerpoint", "standard", standard, standard_result, standard_date, None)]
-            if "powerpoint" in viewed
-            else []
-        )
-        rendered.append(("powerpoint", "fallback", pdf, result, date, self.operations["fallback_clone"]["kept_slides"]))
-        return rendered
+        result, date = self.render("fallback", clone, pdf)
+        self.close_session()
+        return [
+            ("standard", standard, standard_result, standard_date, None),
+            ("fallback", pdf, result, date, self.operations["fallback_clone"]["kept_slides"]),
+        ]
 
-    def close_session(self, renderer: str) -> None:
+    def close_session(self) -> None:
         """変換セッションを閉じる。自分で起動した PowerPoint の終了を待つ時間（数秒）を、所要時間の段階に入れる。"""
-        with self.step(f"close:{renderer}"):
-            self.sessions[renderer].close()
+        with self.step("close:powerpoint"):
+            self.session.close()
 
-    def render(self, renderer: str, variant: str, source: Path, pdf: Path) -> tuple[dict, str]:
+    def render(self, variant: str, source: Path, pdf: Path) -> tuple[dict, str]:
         """1 回の変換。戻り値は（変換の結果、生成した日）。日付のフィールドを表示するページの証拠に入れる（UTC の日付）。"""
-        name = f"render:{renderer}:{variant}"
+        name = f"render:powerpoint:{variant}"
         with self.step(name):
             pdf.parent.mkdir(parents=True, exist_ok=True)
-            result = self.sessions[renderer].render(source, pdf, label=variant)
+            result = self.session.render(source, pdf, label=variant)
             self.operations[name] = result
             if result.get("output_sha256"):
                 self.hashes[pdf.relative_to(self.run).as_posix()] = result["output_sha256"]
@@ -1062,7 +1029,7 @@ class _Build:
             )
         return issues
 
-    def process_pdf(self, renderer: str, variant: str, pdf: Path, render: dict, render_date: str, kept=None) -> dict:
+    def process_pdf(self, variant: str, pdf: Path, render: dict, render_date: str, kept=None) -> dict:
         """変換した PDF の検査と画像化。PPTX の検査（ページの部品）の後に行う。
 
         互換表示の確認用複製は数式のページだけなので、検査には複製のページだけを複製の順に並べた場面を渡し、
@@ -1079,22 +1046,19 @@ class _Build:
             checked = scene
         actual = {key: value for key, value in render.items() if key in _ACTUAL_KEYS}
         environment_hash = display_environment(
-            renderer,
-            self.environment["renderers"].get(renderer),
+            self.environment["renderers"].get("powerpoint"),
             actual,
             self.declared,
             self.environment["packages"].get("pypdfium2"),
             scale=RENDER_SCALE,
         )
         evidence = {
-            slide_id: visual_digest(
-                parts[slide_id], renderer, variant, environment_hash, render_date=render_date, number=number
-            )
+            slide_id: visual_digest(parts[slide_id], variant, environment_hash, render_date=render_date, number=number)
             for slide_id, number in positions.items()
         }
         bodies = {
             slide_id: visual_body_digest(
-                parts[slide_id], renderer, variant, environment_hash, render_date=render_date, number=number
+                parts[slide_id], variant, environment_hash, render_date=render_date, number=number
             )
             for slide_id, number in positions.items()
         }
@@ -1103,7 +1067,6 @@ class _Build:
             pdf,
             checked,
             project,
-            renderer,
             variant,
             fonts=project.fonts,
             layouts=self.layouts,
@@ -1137,11 +1100,10 @@ class _Build:
         self.issues.extend(issues)
         self.set_page_parts(parts)
         for name, value in self.results.items():
-            kind, _, rest = name.partition(":")
-            if kind != "pdf":
+            if not name.startswith("pdf:"):
                 continue
-            renderer, variant = rest.split(":")
-            key = f"{renderer}:{variant}"
+            key = name.removeprefix("pdf:")
+            variant = key.rpartition(":")[2]
             self.issues.extend(value["issues"])
             for page in self.slides:
                 picture = value["pictures"].get(page["id"])
@@ -1162,7 +1124,7 @@ class _Build:
                     {
                         "kind": "visual",
                         "slide_id": page["id"],
-                        "renderer": renderer,
+                        "renderer": "powerpoint",
                         "variant": variant,
                         "evidence_hash": evidence_hash,
                     }
@@ -1172,7 +1134,7 @@ class _Build:
                     {
                         "kind": "overview",
                         "slide_id": None,
-                        "renderer": renderer,
+                        "renderer": "powerpoint",
                         "variant": variant,
                         "evidence_hash": overview_digest(
                             [contact["pixel_hash"] for contact in value["contacts"]],
@@ -1185,10 +1147,10 @@ class _Build:
             else:
                 shown = [value["pictures"][slide_id] for slide_id in value["pictures"]]
             self.images[key] = [item["path"].relative_to(run).as_posix() for item in shown]
-        primary = run / "renders" / self.project.config["render"]["primary"] / "standard" / "deck.pdf"
-        if primary.is_file():
-            _link(primary, run / "deck.pdf")
-            name = primary.relative_to(run).as_posix()
+        standard = run / "renders/powerpoint/standard/deck.pdf"
+        if standard.is_file():
+            _link(standard, run / "deck.pdf")
+            name = standard.relative_to(run).as_posix()
             if name in self.hashes:
                 self.hashes["deck.pdf"] = self.hashes[name]
 
@@ -1439,7 +1401,7 @@ def build(
 
     - slides：部分生成のページ（`selection` の書式）。選んだページだけを書き出す。完成物にできない。指定は生成関数に
       `context.selection` として渡し、資料のコードは選んだページを含む章だけを作ってよい（`context.selected()`）。
-    - draft：下書き。互換画像と主でない表示ソフトの変換を省く。完成物にできない。
+    - draft：下書き。互換画像を省く。完成物にできない。
     - stop_on_error：配置・記述規則・入力の検査でエラーがあれば、PPTX の検査の後に変換の前で止める（status "stopped"）。
       None なら下書きでだけ有効。
     - jobs：PowerPoint を使わない処理の同時プロセス数（`parallel.resolve_jobs`）。

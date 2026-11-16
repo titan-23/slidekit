@@ -12,9 +12,6 @@ author = "slidekit example"
 last_modified_by = "slidekit example"
 subject = "文字の幅・行送り・折り返しを PowerPoint の表示と照合する資料"
 
-[render]
-primary = "powerpoint"
-required = ["powerpoint"]
 
 # PowerPoint が描いた編集可能な数式を照合するので、互換画像は作らない。
 [math]

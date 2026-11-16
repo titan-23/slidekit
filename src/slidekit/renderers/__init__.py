@@ -1,6 +1,6 @@
-"""実際の表示ソフトによるローカルの PDF 変換。
+"""PowerPoint によるローカルの PDF 変換。
 
-`open_session()` で変換セッションを開き、事前確認と変換を同じセッションで行う。PowerPoint のセッション（`powerpoint.py`）は
+`open_session()` で変換セッションを開き、事前確認と変換を同じセッションで行う。セッション（`powerpoint.py`）は
 PowerShell の作業プロセスを 1 つだけ起動し、Windows 利用者ごとの排他を閉じるまで保持する。
 `doctor_renderer()`・`render_pdf()` は、1 回限りのセッションを使う互換の関数である。
 """
@@ -19,11 +19,11 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 import uuid
 
-from ..files import file_hash
+if TYPE_CHECKING:
+    from .powerpoint import PowerPointSession
 
 # PowerShell の作業スクリプト。作業フォルダーへ BOM 付き UTF-8 で書いてから実行する。
 SCRIPT = Path(__file__).with_name("powerpoint.ps1")
@@ -40,10 +40,10 @@ class RendererError(RuntimeError):
         self.details = details
 
 
-def _settings(name: str, environment: Mapping) -> dict:
-    value = environment.get("renderers", {}).get(name, {})
+def _settings(environment: Mapping) -> dict:
+    value = environment.get("powerpoint", {})
     if not isinstance(value, dict):
-        raise RendererError(f"{name} の設定には表が必要です。", code="invalid_renderer")
+        raise RendererError("powerpoint の設定には表が必要です。", code="invalid_renderer")
     return value
 
 
@@ -125,7 +125,7 @@ def _powershell_command(executable: str, script: str) -> list[str]:
 
 def _powershell(environment: Mapping) -> str:
     """設定の PowerShell の実行ファイルを解決する。"""
-    return _executable(_settings("powerpoint", environment).get("powershell", "powershell.exe"))
+    return _executable(_settings(environment).get("powershell", "powershell.exe"))
 
 
 def _windows_context(powershell: str) -> dict:
@@ -366,109 +366,6 @@ def _render_paths(input_pptx: Path, output_pdf: Path) -> tuple[Path, Path]:
     return input_pptx, output_pdf
 
 
-class RendererSession:
-    """変換セッションの共通の形。`open_session()` で開き、with を抜けるとき（例外を含む）に閉じる。
-
-    - `doctor()`：事前確認。PowerPoint ではフォントの照合（`check_windows_fonts`）を含む。結果はセッションの中で使い回す。
-    - `render(input_pptx, output_pdf, *, label)`：新しい PDF を出力する。戻り値は従来の `render_pdf()` と同じキーに `label` を加えたもの。
-    - `close()`：後片付けの結果を返す。2 回目以降は何もしない。
-    - `operations`：生成記録の `operations.sessions` に入れる値。
-    """
-
-    name = ""
-
-    def start(self) -> None:
-        """セッションを使用できる状態にする（`open_session()` が呼ぶ）。"""
-
-    def doctor(self) -> dict:
-        raise NotImplementedError
-
-    def render(self, input_pptx: Path, output_pdf: Path, *, label: str = "render") -> dict:
-        raise NotImplementedError
-
-    def close(self) -> dict:
-        raise NotImplementedError
-
-    def _interrupt(self) -> None:
-        """利用者の中断（Ctrl+C）を受けたときの後片付け。"""
-
-    @property
-    def operations(self) -> dict:
-        return {}
-
-
-class LibreOfficeSession(RendererSession):
-    """LibreOffice の変換。排他を持たず、事前確認の結果を変換で使い回す（変換ごとに版を問い合わせない）。"""
-
-    name = "libreoffice"
-
-    def __init__(self, environment: Mapping) -> None:
-        self.environment = environment
-        self._doctor: dict | None = None
-        self._doctor_runs = 0
-        self._renders = 0
-        self._closed = False
-
-    def doctor(self) -> dict:
-        if self._doctor is None:
-            executable = _executable(_settings(self.name, self.environment).get("executable", "libreoffice"))
-            process = _run([executable, "--version"])
-            self._doctor_runs += 1
-            version = _decode(process.stdout).strip()
-            if process.returncode or not version:
-                raise RendererError("LibreOffice の版を取得できません。")
-            self._doctor = {"ok": True, "renderer": self.name, "version": version, "executable": executable}
-        return dict(self._doctor)
-
-    def render(self, input_pptx: Path, output_pdf: Path, *, label: str = "render") -> dict:
-        input_pptx, output_pdf = _render_paths(input_pptx, output_pdf)
-        info = self.doctor()
-        timeout = _seconds(_settings(self.name, self.environment).get("timeout", 90), "制限時間", positive=True)
-        self._renders += 1
-        started = time.monotonic()
-        with tempfile.TemporaryDirectory(prefix="slidekit-libreoffice-") as folder:
-            work = Path(folder)
-            staged = work / "input.pptx"
-            shutil.copy2(input_pptx, staged)
-            profile = (work / "profile").as_uri()
-            command = [
-                info["executable"],
-                f"-env:UserInstallation={profile}",
-                "--headless",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                str(work),
-                str(staged),
-            ]
-            process = _run(command, timeout=timeout)
-            generated = work / "input.pdf"
-            if process.returncode or not generated.is_file() or not _is_pdf(generated):
-                raise RendererError(
-                    "LibreOffice による PDF 変換に失敗しました。",
-                    stdout=_decode(process.stdout),
-                    stderr=_decode(process.stderr),
-                )
-            output_pdf.parent.mkdir(parents=True, exist_ok=True)
-            with generated.open("rb") as source, output_pdf.open("xb") as target:
-                shutil.copyfileobj(source, target)
-        return {
-            **info,
-            "label": label,
-            "elapsed_seconds": round(time.monotonic() - started, 3),
-            "input_sha256": file_hash(input_pptx),
-            "output_sha256": file_hash(output_pdf),
-        }
-
-    def close(self) -> dict:
-        self._closed = True
-        return {"renderer": self.name, "closed": True}
-
-    @property
-    def operations(self) -> dict:
-        return {"renders": self._renders, "doctor_runs": self._doctor_runs}
-
-
 def _is_pdf(path: Path) -> bool:
     with path.open("rb") as stream:
         return stream.read(5) == b"%PDF-"
@@ -476,37 +373,29 @@ def _is_pdf(path: Path) -> bool:
 
 @contextlib.contextmanager
 def open_session(
-    name: str,
     environment: Mapping,
     *,
     wait_seconds: float | None = None,
     holder: dict | None = None,
     on_event: Callable[[dict], None] | None = None,
     state_dir: Path | None = None,
-) -> Iterator[RendererSession]:
-    """表示ソフトの変換セッションを開き、with を抜けるとき（例外を含む）に閉じる。
+) -> Iterator[PowerPointSession]:
+    """PowerPoint の変換セッションを開き、with を抜けるとき（例外を含む）に閉じる。
 
-    - name：`powerpoint` か `libreoffice`。それ以外は `unsupported_renderer`。
-    - wait_seconds：別の変換が終わるのを待つ上限（秒）。None なら `environment["renderers"][name]["wait_seconds"]`（既定 600）。0 は待たない。
+    - wait_seconds：別の変換が終わるのを待つ上限（秒）。None なら `environment["powerpoint"]["wait_seconds"]`（既定 600）。0 は待たない。
     - holder：待つ側に見せる情報（JSON にできる 2 KB までの辞書。`project`・`run`・`command`・`host`・`python_pid` など）。
     - on_event：途中経過の通知（`{"event": "waiting", "waited_seconds": …, "holder": …}` など）。呼び出し元のスレッドで、
       応答を待つ間に呼ぶ。
     - state_dir：試験専用。残存記録と使用中の記録の置き場所を差し替える。
 
-    PowerPoint では開くときに PowerShell の作業プロセスを起動して排他を取り、閉じるまで保持する。
+    開くときに PowerShell の作業プロセスを起動して排他を取り、閉じるまで保持する。
     利用者の中断（Ctrl+C）は、準備完了の前なら作業プロセスを終了させ、後なら切り離して、`KeyboardInterrupt` を送り直す。
     """
-    session: RendererSession
-    if name == "powerpoint":
-        from .powerpoint import PowerPointSession
+    from .powerpoint import PowerPointSession
 
-        session = PowerPointSession(
-            environment, wait_seconds=wait_seconds, holder=holder, on_event=on_event, state_dir=state_dir
-        )
-    elif name == "libreoffice":
-        session = LibreOfficeSession(environment)
-    else:
-        raise RendererError(f"未対応の表示ソフトです: {name}", code="unsupported_renderer")
+    session = PowerPointSession(
+        environment, wait_seconds=wait_seconds, holder=holder, on_event=on_event, state_dir=state_dir
+    )
     try:
         session.start()
         yield session
@@ -517,16 +406,16 @@ def open_session(
         session.close()
 
 
-def doctor_renderer(name: str, environment: Mapping) -> dict:
-    """指定した表示ソフトの環境を確かめる。別のソフトへ切り替えない（1 回限りのセッションを使う）。"""
-    with open_session(name, environment) as session:
+def doctor_renderer(environment: Mapping) -> dict:
+    """PowerPoint の環境を確かめる（1 回限りのセッションを使う）。"""
+    with open_session(environment) as session:
         return session.doctor()
 
 
-def render_pdf(input_pptx: Path, output_pdf: Path, renderer: str, environment: Mapping) -> dict:
+def render_pdf(input_pptx: Path, output_pdf: Path, environment: Mapping) -> dict:
     """新しい PDF を出力する。失敗時は成功の結果を返さない（1 回限りのセッションを使う）。"""
     input_pptx, output_pdf = _render_paths(input_pptx, output_pdf)
-    with open_session(renderer, environment) as session:
+    with open_session(environment) as session:
         return session.render(input_pptx, output_pdf)
 
 
@@ -549,10 +438,6 @@ def _maintenance(
         return _result(_run(command, timeout=MAINTENANCE_TIMEOUT_SECONDS))
     finally:
         shutil.rmtree(work, ignore_errors=True)
-
-
-def _unsupported(name: str) -> RendererError:
-    return RendererError(f"未対応の表示ソフトです: {name}", code="unsupported_renderer")
 
 
 def _items(value: Any) -> list[dict]:
@@ -622,7 +507,7 @@ def _stopped_powerpoint(value: Any) -> list[dict]:
     ]
 
 
-def renderer_status(name: str, environment: Mapping, *, state_dir: Path | None = None) -> dict:
+def renderer_status(environment: Mapping, *, state_dir: Path | None = None) -> dict:
     """排他・残存記録・使用中の処理を調べる（`slidekit renderer status`）。
 
     排他は取ることができたら直ちに放す。`status` は `idle`・`busy`（別の処理が排他を持つ）・`pending`（残存記録がある）で、
@@ -634,26 +519,6 @@ def renderer_status(name: str, environment: Mapping, *, state_dir: Path | None =
     一致するか（`_powerpoint_processes`）、`powerpoint_records` はその記録と、記録の処理が動いているかである。
     記録は作業スクリプトが PowerPoint を起動したときに書く（残存記録と使用中の記録の `powerpoint`）。古い記録には記録がない。
     """
-    result = {"command": "renderer status", "renderer": name}
-    if name == "libreoffice":
-        return {
-            **result,
-            "status": "idle",
-            "busy": False,
-            "holder": None,
-            "pending": None,
-            "pending_process_alive": None,
-            "staged_input_locked": None,
-            "powerpoint_running": None,
-            "powerpoint_processes": None,
-            "powerpoint_records": None,
-            "abandoned": None,
-            "state_dir": None,
-            "message": "LibreOffice には残存記録がありません。",
-            "exit_code": 0,
-        }
-    if name != "powerpoint":
-        raise _unsupported(name)
     value = _maintenance("Status", environment, state_dir=state_dir)
     busy = bool(value.get("busy"))
     pending = value.get("pending") if isinstance(value.get("pending"), dict) else None
@@ -661,7 +526,7 @@ def renderer_status(name: str, environment: Mapping, *, state_dir: Path | None =
     status = "busy" if busy else "pending" if exists else "idle"
     alive = value.get("pending_process_alive")
     return {
-        **result,
+        "command": "renderer status",
         "status": status,
         "busy": busy,
         "holder": _holder(value.get("holder")) if busy else None,
@@ -680,7 +545,6 @@ def renderer_status(name: str, environment: Mapping, *, state_dir: Path | None =
 
 
 def clear_pending(
-    name: str,
     environment: Mapping,
     *,
     force: bool = False,
@@ -702,28 +566,12 @@ def clear_pending(
     残した使用中の記録と一致する PowerPoint は終了する。一致する PowerPoint にウィンドウがあれば、終了せずに断る。
     終了した PowerPoint は `stopped_powerpoint`（`pid`・`started_at`・`record`）に入る。ほかの PowerPoint には触れない。
     """
-    result = {"command": "renderer clear", "renderer": name}
-    if name == "libreoffice":
-        return {
-            **result,
-            "status": "nothing",
-            "reason": "LibreOffice には残存記録がありません。",
-            "archived": None,
-            "removed_work_dir": False,
-            "removed_old_work_dirs": 0,
-            "pending": None,
-            "holder": None,
-            "stopped_powerpoint": [],
-            "exit_code": 0,
-        }
-    if name != "powerpoint":
-        raise _unsupported(name)
     value = _maintenance("Clear", environment, state_dir=state_dir, force=force, stop_owned=stop_owned)
     status = value.get("status")
     if status not in ("cleared", "nothing", "refused"):
         raise RendererError(f"残存記録の解除の結果が不正です: {status}", code="renderer_protocol", result=value)
     return {
-        **result,
+        "command": "renderer clear",
         "status": status,
         "reason": str(value.get("reason") or ""),
         "archived": value.get("archived"),
@@ -738,7 +586,6 @@ def clear_pending(
 
 __all__ = [
     "RendererError",
-    "RendererSession",
     "open_session",
     "doctor_renderer",
     "render_pdf",

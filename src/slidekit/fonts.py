@@ -90,7 +90,7 @@ def _detect_font_directories(environment: Mapping) -> tuple[Path, ...]:
     if os.name == "nt":
         key = "nt"
     elif _is_wsl():
-        key = str(environment.get("renderers", {}).get("powerpoint", {}).get("powershell", "powershell.exe"))
+        key = str(environment.get("powerpoint", {}).get("powershell", "powershell.exe"))
     else:
         return ()
     if key not in _DETECTED:

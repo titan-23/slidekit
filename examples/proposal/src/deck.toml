@@ -16,13 +16,9 @@ read_roots = ["."]
 bibliography = []
 asset_dirs = []
 
-[render]
-primary = "powerpoint"
-required = ["powerpoint"]
 
 [math]
 fallback = "required"
-fallback_renderer = "powerpoint"
 
 # 完成物は資料のディレクトリの直下（src/ の一つ上）に置く。
 [deliverables]

@@ -249,13 +249,10 @@ def _environment_paths(data, base, name):
             if not folder.is_dir():
                 problems.append(Problem(name, "font_directories", f"のフォルダーがありません: {folder}"))
             data["font_directories"].append(str(folder))
-    renderers = data.get("renderers")
-    for renderer in renderers.values() if isinstance(renderers, dict) else ():
-        if isinstance(renderer, dict):
-            for key in ("executable", "powershell"):
-                value = renderer.get(key)
-                if _is_local(value) and ("/" in value or "\\" in value) and not re.match(r"^[A-Za-z]:", value):
-                    renderer[key] = str(_local_path(value, base))
+    powerpoint = data.get("powerpoint")
+    value = powerpoint.get("powershell") if isinstance(powerpoint, dict) else None
+    if _is_local(value) and ("/" in value or "\\" in value) and not re.match(r"^[A-Za-z]:", value):
+        powerpoint["powershell"] = str(_local_path(value, base))
     return data, problems
 
 
@@ -279,13 +276,7 @@ def _environment_settings(paths, root=None, *, complete=True):
     ファイルごとに設定名と値を確かめる。重ねた後に書体に path があることは、すべての設定ファイルの読み込みに成功したときだけ
     確かめる（complete が偽なら、呼び出し側で読み込みに失敗した設定ファイルがある）。
     """
-    data = {
-        "fonts": {},
-        "renderers": {
-            "powerpoint": {"powershell": "powershell.exe", "timeout": 90},
-            "libreoffice": {"executable": "libreoffice", "timeout": 90},
-        },
-    }
+    data = {"fonts": {}, "powerpoint": {"powershell": "powershell.exe", "timeout": 90}}
     records, problems, owners = [], [], {}
     for path in paths:
         name = _display(path, root)
@@ -641,11 +632,7 @@ def load_project(path) -> Project:
             if file in destinations or _within(file, output_dir):
                 raise ValueError("資料設定と保存先が重複しています")
             project.input_files[str(file)] = file_hash(file)
-        config["render"] = merge({"primary": "powerpoint", "required": ["powerpoint"]}, config.get("render", {}))
-        config["math"] = merge(
-            {"fallback": "auto", "fallback_renderer": "powerpoint", "fallback_scale": 4, "functions": []},
-            config.get("math", {}),
-        )
+        config["math"] = merge({"fallback": "off", "fallback_scale": 4, "functions": []}, config.get("math", {}))
         config["images"] = merge({"raster_scale": 2, "vector": False}, config.get("images", {}))
         for kind, source in (("theme", theme_source), ("rules", rules_source)):
             _track_resource(project, _bundled(kind))

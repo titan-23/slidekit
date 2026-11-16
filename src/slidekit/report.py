@@ -14,7 +14,7 @@ from pathlib import Path
 import shlex
 from typing import Any, Iterable
 
-from .progress import RENDERER_LABELS, stage_label
+from .progress import stage_label
 from .selection import format_numbers
 
 SEVERITY_ORDER = {"error": 0, "warning": 1, "info": 2}
@@ -691,27 +691,28 @@ def _font_line(environment: dict) -> str | None:
         names.append(f"{family}（通常・太字）" if bold else _text(family))
         expected.update({(family, "regular"), *([(family, "bold")] if bold else [])})
     found = set()
-    renderers = environment.get("renderers")
-    for info in renderers.values() if isinstance(renderers, dict) else []:
-        for match in info.get("font_matches") or [] if isinstance(info, dict) else []:
-            if isinstance(match, dict):
-                found.add((match.get("family"), match.get("variant")))
+    info = _powerpoint(environment)
+    for match in info.get("font_matches") or []:
+        if isinstance(match, dict):
+            found.add((match.get("family"), match.get("variant")))
     return "フォント: " + "、".join(names) + ("。Windows の登録書体と一致" if found and expected <= found else "")
 
 
+def _powerpoint(environment: dict) -> dict:
+    """実行環境の記録の、PowerPoint の事前確認の結果（environment.renderers.powerpoint）。なければ空。"""
+    renderers = environment.get("renderers") if isinstance(environment.get("renderers"), dict) else {}
+    return renderers.get("powerpoint") if isinstance(renderers.get("powerpoint"), dict) else {}
+
+
 def _renderer_line(result: dict, environment: dict) -> str | None:
-    detected = environment.get("renderers") if isinstance(environment.get("renderers"), dict) else {}
-    reported = result.get("renderers") if isinstance(result.get("renderers"), dict) else {}
-    parts = []
-    for name in [*reported, *(name for name in detected if name not in reported)]:
-        info = {**(detected.get(name) or {}), **(reported.get(name) or {})}
-        label = RENDERER_LABELS.get(name, _text(name))
-        if info.get("status") == "failed" or info.get("ok") is False:
-            parts.append(f"{label} を確認できない" + (f"（{info['message']}）" if info.get("message") else ""))
-            continue
-        text = " ".join(_text(part) for part in (label, info.get("version")) if part)
-        parts.append(text + (f"（{info['executable']}）" if info.get("executable") else ""))
-    return "表示ソフト: " + "、".join(parts) if parts else None
+    reported = result.get("powerpoint") if isinstance(result.get("powerpoint"), dict) else {}
+    info = {**_powerpoint(environment), **reported}
+    if not info:
+        return None
+    if info.get("status") == "failed" or info.get("ok") is False:
+        return "表示ソフト: PowerPoint を確認できない" + (f"（{info['message']}）" if info.get("message") else "")
+    text = " ".join(_text(part) for part in ("PowerPoint", info.get("version")) if part)
+    return "表示ソフト: " + text + (f"（{info['executable']}）" if info.get("executable") else "")
 
 
 def _doctor(result: dict, limit: int) -> list[str]:
@@ -742,8 +743,7 @@ def _short_stage(name: Any) -> str:
     name = _text(name)
     kind, _, rest = name.partition(":")
     if kind == "render" and rest:
-        renderer = rest.partition(":")[0]
-        return f"{RENDERER_LABELS.get(renderer, renderer)} の変換"
+        return "PowerPoint の変換"
     if kind == "pdf":
         return "PDF の検査と画像化"
     if kind == "doctor":
@@ -945,10 +945,7 @@ def _run_of(result: dict) -> Any:
 
 def _review_target(target: Any) -> str:
     target = target if isinstance(target, dict) else {}
-    kind = _REVIEW_KINDS.get(target.get("kind"), _text(target.get("kind")) or "確認")
-    details = [_text(target.get("renderer")), _VARIANT_NAMES.get(target.get("variant"), _text(target.get("variant")))]
-    details = [detail for detail in details if detail]
-    return kind + (f"（{'・'.join(details)}）" if details else "")
+    return _group_name(target.get("kind"), target.get("variant"))
 
 
 def _check_body(result: dict, limit: int, *, run: Any = None) -> tuple[list[str], dict]:
@@ -1260,8 +1257,7 @@ def _recorded_powerpoint(result: dict, pending: dict) -> tuple[str, bool]:
 
 def _renderer_status(result: dict, limit: int) -> list[str]:
     status = result.get("status")
-    label = RENDERER_LABELS.get(result.get("renderer"), _text(result.get("renderer")) or "表示ソフト")
-    lines = [f"表示ソフトの状態: {STATUS_LABELS.get(status, _text(status) or '状態不明')}（{label}）"]
+    lines = [f"表示ソフトの状態: {STATUS_LABELS.get(status, _text(status) or '状態不明')}（PowerPoint）"]
     holder = result.get("holder")
     if isinstance(holder, dict) and holder:
         lines.append(f"使用中の処理: {_holder_text(holder)}")
@@ -1353,14 +1349,12 @@ def _renderer_clear(result: dict, limit: int) -> list[str]:
 # ---------------------------------------------------------------- 確認記録の操作
 
 
-def _group_name(kind: Any, renderer: Any = None, variant: Any = None) -> str:
-    """確認の組（種類・表示ソフト・表示方法）の名前。内容の確認は表示ソフトによらない。"""
+def _group_name(kind: Any, variant: Any = None) -> str:
+    """確認の組（種類・表示方法）の名前。表示方法は表示の確認だけに添える（一覧画像は標準表示だけ）。"""
     name = _REVIEW_KINDS.get(kind, _text(kind) or "確認")
-    if kind == "content":
+    if kind != "visual" or not variant:
         return name
-    details = [_text(renderer), _VARIANT_NAMES.get(variant, _text(variant))]
-    details = [detail for detail in details if detail]
-    return name + (f"（{'・'.join(details)}）" if details else "")
+    return f"{name}（{_VARIANT_NAMES.get(variant, _text(variant))}）"
 
 
 def _paths_text(item: dict) -> str:
@@ -1479,7 +1473,7 @@ def _review_status(result: dict, limit: int) -> list[str]:
     if waiting:
         lines.append("  未確認:")
         for group in waiting:
-            name = _group_name(group.get("kind"), group.get("renderer"), group.get("variant"))
+            name = _group_name(group.get("kind"), group.get("variant"))
             pending = group["pending"] if isinstance(group["pending"], list) else []
             if group.get("kind") == "overview":
                 lines.append(f"    {name} 未確認")
@@ -1528,13 +1522,11 @@ def _review_record(result: dict, limit: int) -> list[str]:
         lines.append(f"実行: {_shown(run)}")
     targets = result.get("targets") if isinstance(result.get("targets"), dict) else {}
     for key, values in targets.items():
-        kind, _, rest = _text(key).partition(":")
-        renderer, _, variant = rest.partition(":")
+        kind, _, variant = _text(key).partition(":")
         values = values if isinstance(values, list) else []
         pages = [value for value in values if value is not None]
         lines.append(
-            f"  {_group_name(kind, renderer or None, variant or None)} {len(values)} 件"
-            + (f"（{_listed_ids(pages)}）" if pages else "")
+            f"  {_group_name(kind, variant or None)} {len(values)} 件" + (f"（{_listed_ids(pages)}）" if pages else "")
         )
     remaining = result.get("remaining") if isinstance(result.get("remaining"), dict) else None
     operation = _status_operation(run)

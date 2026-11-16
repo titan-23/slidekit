@@ -835,18 +835,6 @@ class Deck:
             "rules": copy.deepcopy(self.project.rules),
             "slides": [slide.to_dict(number, len(self.slides)) for number, slide in enumerate(self.slides, 1)],
         }
-        has_math = any(
-            fragment["kind"] == "math"
-            for slide in scene["slides"]
-            for element in slide["elements"]
-            for fragment in element.get("content", [])
-        )
-        if (
-            has_math
-            and self.project.config["math"]["fallback"] == "off"
-            and "libreoffice" in self.project.config["render"]["required"]
-        ):
-            raise InputError("LibreOffice が必須の数式資料では互換画像を off にできません", code="input_error")
         overflows = [(number, slide) for number, slide in enumerate(self.slides, 1) if slide._taken_overflows]
         if self.issues or overflows:
             from .validators import make_diagnostic, merge_diagnostics
@@ -1795,7 +1783,10 @@ class Slide:
 
     @staticmethod
     def _tail_geometry(area, shape, style, toward, fixed_side):
-        """しっぽの (辺, `outline.Outline`)。付け根が収まらなければ TailWidthError、指す点の誤りは TailPointError。"""
+        """しっぽの (辺, `outline.Outline`, 先端のずらし)。付け根が収まらなければ TailWidthError、指す点の誤りは TailPointError。
+
+        先端のずらしは、指す点が付け根の正面にないときに先端を点の方へ向ける量（pt）で、指す点がなければ 0 である。
+        """
 
         def value(name, default):
             found = style.get(name)
@@ -1805,11 +1796,22 @@ class Slide:
         width, length = value("tail_width_pt", TAIL_WIDTH_PT), value("tail_length_pt", TAIL_LENGTH_PT)
         if toward is not None:
             point = toward.point() if isinstance(toward, Anchor) else toward
-            side, at = tail_from_point(area, shape, point, side=fixed_side, corner_radius_pt=radius, width_pt=width)
+            side, at, shift = tail_from_point(
+                area, shape, point, side=fixed_side, corner_radius_pt=radius, width_pt=width, length_pt=length
+            )
         else:
-            side, at = style["tail_side"], value("tail_at", TAIL_AT)
-        outline = tail_outline(area, shape, side=side, at=at, width_pt=width, length_pt=length, corner_radius_pt=radius)
-        return side, outline
+            side, at, shift = style["tail_side"], value("tail_at", TAIL_AT), 0.0
+        outline = tail_outline(
+            area,
+            shape,
+            side=side,
+            at=at,
+            width_pt=width,
+            length_pt=length,
+            corner_radius_pt=radius,
+            tip_shift_pt=shift,
+        )
+        return side, outline, shift
 
     def _tail_error(self, error, element_id) -> InputError:
         """しっぽの形を決めることができない誤り（付け根の幅は invalid_style、指す点は invalid_geometry）。"""
@@ -1858,7 +1860,7 @@ class Slide:
         if toward is None and style.get("tail_side") not in TAIL_SIDES:
             return
         try:
-            side, outline = self._tail_geometry(
+            side, outline, shift = self._tail_geometry(
                 element.area, data.get("shape", "rectangle"), style, toward, getattr(element, "_tail_side", None)
             )
         except (TailWidthError, TailPointError) as error:
@@ -1877,6 +1879,9 @@ class Slide:
             "length_pt": float(style.get("tail_length_pt") or TAIL_LENGTH_PT),
             "points": [list(point) for point in outline.tail],
         }
+        if shift:
+            # 指す点が付け根の正面にないとき、先端を点の方へ向けたずらし（tail_toward のときだけ 0 以外になる）。
+            tail["tip_shift_pt"] = shift
         if toward is not None:
             tail["target"] = toward.reference() if isinstance(toward, Anchor) else {"point": list(toward)}
         data["actual_area"] = list(outline.actual_area)

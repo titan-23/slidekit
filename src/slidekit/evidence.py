@@ -392,7 +392,6 @@ def pptx_pages(path: str | Path) -> dict[str, PageParts]:
 
 
 def display_environment(
-    renderer: str,
     detected: Mapping | None,
     actual: Mapping | None,
     fonts: Mapping | None,
@@ -402,7 +401,7 @@ def display_environment(
 ) -> str:
     """表示環境の証拠。
 
-    detected は事前確認の結果（版、実行ファイル、Windows の利用者、フォントの照合の結果）、actual は変換の結果
+    detected は PowerPoint の事前確認の結果（版、実行ファイル、Windows の利用者、フォントの照合の結果）、actual は変換の結果
     （表示ソフト、版、ビルド、実行ファイル）、fonts は実行環境で宣言したフォントごとの内容の証拠である。
     状態のフォルダー・登録された書体の一覧・変換ごとに変わる値（所要時間・入出力のハッシュ値）と、
     計測で使ったフォントの一覧は入れない（使うフォントが増えただけで全ページの証拠が変わるのを避ける）。
@@ -415,7 +414,7 @@ def display_environment(
     return json_digest(
         {
             "format": EVIDENCE_VERSION,
-            "renderer": renderer,
+            "renderer": "powerpoint",
             "detected": {
                 "font_matches": matches,
                 **{key: detected.get(key) for key in ("version", "executable", "windows_user_sid")},
@@ -429,7 +428,7 @@ def display_environment(
 
 
 def visual_body_digest(
-    page: PageParts, renderer: str, variant: str, environment_hash: str, *, render_date: str, number: int | None = None
+    page: PageParts, variant: str, environment_hash: str, *, render_date: str, number: int | None = None
 ) -> str | None:
     """ページ番号の図形を除いた表示の証拠（visual_digest と同じ形）。ページ番号の図形がなければ None。
 
@@ -438,13 +437,13 @@ def visual_body_digest(
     if page.body_choice is None or page.body_full is None:
         return None
     body = PageParts(page.slide_id, page.number, page.body_choice, page.body_full, None, page.fields)
-    return visual_digest(body, renderer, variant, environment_hash, render_date=render_date, number=number)
+    return visual_digest(body, variant, environment_hash, render_date=render_date, number=number)
 
 
 def visual_digest(
-    page: PageParts, renderer: str, variant: str, environment_hash: str, *, render_date: str, number: int | None = None
+    page: PageParts, variant: str, environment_hash: str, *, render_date: str, number: int | None = None
 ) -> str:
-    """表示の証拠。PowerPoint の標準表示は choice、それ以外（LibreOffice、互換表示）は full を使う。
+    """表示の証拠。標準表示は choice、互換表示は full を使う。
 
     number は変換した資料の中のページの位置である。標準表示では省略でき、page.number を使う。
     互換表示の確認用複製は数式のページだけに間引くので、複製の中の位置（prepare_fallback の kept_slides）を必ず渡す。
@@ -456,11 +455,10 @@ def visual_digest(
         if variant == "fallback":
             raise ValueError("互換表示の証拠には、確認用複製の中のページの位置（kept_slides の number）を渡す")
         number = page.number
-    parts = page.choice if (renderer == "powerpoint" and variant == "standard") else page.full
     value: dict[str, Any] = {
         "format": EVIDENCE_VERSION,
-        "parts": parts,
-        "renderer": renderer,
+        "parts": page.choice if variant == "standard" else page.full,
+        "renderer": "powerpoint",
         "variant": variant,
         "environment": environment_hash,
     }

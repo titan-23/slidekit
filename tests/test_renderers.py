@@ -333,10 +333,10 @@ def blocking_render(*, write_record=True, write_pdf=False):
     return respond
 
 
-def test_missing_renderer_does_not_fall_back(monkeypatch):
+def test_missing_executable_is_reported(monkeypatch):
     monkeypatch.setattr(renderers.shutil, "which", lambda _: None)
     with pytest.raises(renderers.RendererError, match="見つかりません") as error:
-        renderers.doctor_renderer("powerpoint", {})
+        renderers.doctor_renderer({})
     assert error.value.code == "renderer_missing"
 
 
@@ -355,7 +355,7 @@ def test_existing_output_is_never_reused(tmp_path):
     output = tmp_path / "deck.pdf"
     output.write_bytes(b"old PDF")
     with pytest.raises(renderers.RendererError) as error:
-        renderers.render_pdf(source, output, "powerpoint", {})
+        renderers.render_pdf(source, output, {})
     assert error.value.code == "output_exists"
     assert output.read_bytes() == b"old PDF"
 
@@ -383,7 +383,7 @@ def test_bad_worker_output_is_not_success():
 def test_session_reuses_one_worker_for_doctor_and_renders(tmp_path, fake_windows):
     source = tmp_path / "deck.pptx"
     source.write_bytes(b"source")
-    with renderers.open_session("powerpoint", {"fonts": {}}) as session:
+    with renderers.open_session({"fonts": {}}) as session:
         doctor = session.doctor()
         first = session.render(source, tmp_path / "standard.pdf", label="standard")
         second = session.render(source, tmp_path / "fallback.pdf", label="fallback")
@@ -417,14 +417,14 @@ def test_session_reuses_one_worker_for_doctor_and_renders(tmp_path, fake_windows
 
 
 def test_windows_context_is_cached_per_process(fake_windows):
-    with renderers.open_session("powerpoint", {}) as first:
+    with renderers.open_session({}) as first:
         first_operations = first.operations
-    with renderers.open_session("powerpoint", {}) as second:
+    with renderers.open_session({}) as second:
         second_operations = second.operations
     assert fake_windows.context_calls == 1 and len(fake_windows.workers) == 2
     assert (first_operations["powershell_launches"], second_operations["powershell_launches"]) == (2, 1)
     # PowerShell の実行ファイルが違えば、別に問い合わせる。
-    renderers.windows_context({"renderers": {"powerpoint": {"powershell": "pwsh.exe"}}})
+    renderers.windows_context({"powerpoint": {"powershell": "pwsh.exe"}})
     renderers.windows_context({})
     assert fake_windows.context_calls == 2
 
@@ -449,7 +449,7 @@ def test_windows_context_is_cached_and_reports_fonts(monkeypatch):
     first = renderers.windows_context({})
     # 返した値を書き換えても、覚えた値は変わらない。
     first["fonts"] = "changed"
-    assert renderers.windows_context({"renderers": {"powerpoint": {}}}) == {
+    assert renderers.windows_context({"powerpoint": {}}) == {
         "temp": "C:\\Temp\\",
         "local_app_data": "C:\\Users\\example\\AppData\\Local",
         "sid": "S-1-5-21-example",
@@ -463,7 +463,7 @@ def test_windows_context_is_cached_and_reports_fonts(monkeypatch):
 def test_session_paths_use_one_wslpath_call_per_folder(tmp_path, fake_windows):
     source = tmp_path / "deck.pptx"
     source.write_bytes(b"source")
-    with renderers.open_session("powerpoint", {}) as session:
+    with renderers.open_session({}) as session:
         for name in ("a.pdf", "b.pdf", "c.pdf"):
             session.render(source, tmp_path / name)
     (worker,) = fake_windows.workers
@@ -480,12 +480,12 @@ def test_render_pdf_and_doctor_renderer_remain_compatible(tmp_path, fake_windows
 
     fake_windows.respond = respond
     monkeypatch.setattr(renderers, "check_windows_fonts", lambda environment, fonts: ["matched", fonts[0]["name"]])
-    info = renderers.doctor_renderer("powerpoint", {})
+    info = renderers.doctor_renderer({})
     assert info["font_matches"] == ["matched", "Example Font"]
     assert set(info) == {"ok", "renderer", "version", "executable", "windows_user_sid", "state_dir", "font_matches"}
     source, target = tmp_path / "deck.pptx", tmp_path / "out" / "deck.pdf"
     source.write_bytes(b"source")
-    rendered = renderers.render_pdf(source, target, "powerpoint", {})
+    rendered = renderers.render_pdf(source, target, {})
     assert target.read_bytes().startswith(b"%PDF-")
     assert set(rendered) == {
         "ok",
@@ -532,7 +532,7 @@ def test_session_render_failures_are_not_success(tmp_path, fake_windows, respons
     source, target = tmp_path / "deck.pptx", tmp_path / "deck.pdf"
     source.write_bytes(b"source")
     with pytest.raises(renderers.RendererError) as error:
-        renderers.render_pdf(source, target, "powerpoint", {})
+        renderers.render_pdf(source, target, {})
     assert error.value.code == code
     if code == "renderer_pending":
         assert error.value.details["pending"] == str(fake_windows.pending)
@@ -555,51 +555,12 @@ def early_exit(worker, request):
 def test_worker_output_garbage_is_protocol_error(fake_windows, respond, text):
     fake_windows.respond = respond
     with pytest.raises(renderers.RendererError) as error:
-        renderers.doctor_renderer("powerpoint", {})
+        renderers.doctor_renderer({})
     assert error.value.code == "renderer_protocol"
     assert text in str(error.value)
     # 準備完了の後なので終了させず、切り離す。
     (worker,) = fake_windows.workers
     assert worker.stdin.closed and not worker.killed
-
-
-def libreoffice_run(calls, *, write_pdf=True):
-    def fake_run(command, **kwargs):
-        calls.append(command)
-        if command[-1] == "--version":
-            return subprocess.CompletedProcess(command, 0, b"LibreOffice 24.2\n", b"")
-        if write_pdf:
-            (Path(command[command.index("--outdir") + 1]) / "input.pdf").write_bytes(b"%PDF-1.7\nLibreOffice")
-        return subprocess.CompletedProcess(command, 0, b"", b"")
-
-    return fake_run
-
-
-def test_libreoffice_session_reuses_doctor(tmp_path, monkeypatch):
-    calls = []
-    monkeypatch.setattr(renderers, "_executable", lambda value: f"/fake/{value}")
-    monkeypatch.setattr(renderers, "_run", libreoffice_run(calls))
-    source = tmp_path / "deck.pptx"
-    source.write_bytes(b"source")
-    with renderers.open_session("libreoffice", {}) as session:
-        info = session.doctor()
-        first = session.render(source, tmp_path / "a.pdf", label="standard")
-        session.render(source, tmp_path / "b.pdf")
-        operations = session.operations
-    assert [command[-1] for command in calls].count("--version") == 1
-    assert (info["version"], first["version"], first["label"]) == ("LibreOffice 24.2", "LibreOffice 24.2", "standard")
-    assert operations == {"renders": 2, "doctor_runs": 1}
-    assert (tmp_path / "b.pdf").read_bytes().startswith(b"%PDF-")
-
-
-def test_libreoffice_conversion_without_output_fails(tmp_path, monkeypatch):
-    source, target = tmp_path / "deck.pptx", tmp_path / "deck.pdf"
-    source.write_bytes(b"source")
-    monkeypatch.setattr(renderers, "_executable", lambda value: f"/fake/{value}")
-    monkeypatch.setattr(renderers, "_run", libreoffice_run([], write_pdf=False))
-    with pytest.raises(renderers.RendererError, match="変換に失敗"):
-        renderers.render_pdf(source, target, "libreoffice", {})
-    assert not target.exists()
 
 
 def test_session_reports_waiting_with_holder(fake_windows):
@@ -611,7 +572,7 @@ def test_session_reports_waiting_with_holder(fake_windows):
     fake_windows.startup = startup
     events = []
     holder = {"project": "/mine/deck.toml", "run": "/mine/out/runs/0012", "command": "build"}
-    with renderers.open_session("powerpoint", {}, wait_seconds=30, holder=holder, on_event=events.append) as session:
+    with renderers.open_session({}, wait_seconds=30, holder=holder, on_event=events.append) as session:
         operations = session.operations
     assert [(event["event"], event["waited_seconds"]) for event in events] == [("waiting", 0.0), ("waiting", 5.0)]
     assert events[1]["holder"] == HOLDER_VIEW
@@ -635,7 +596,7 @@ def test_session_busy_after_wait_names_holder(fake_windows):
 
     fake_windows.startup = startup
     with pytest.raises(renderers.RendererError) as error:
-        with renderers.open_session("powerpoint", {}, wait_seconds=10):
+        with renderers.open_session({}, wait_seconds=10):
             pass
     assert error.value.code == "renderer_busy"
     assert "PID 1234" in str(error.value)
@@ -649,13 +610,11 @@ def test_session_busy_after_wait_names_holder(fake_windows):
 def test_wait_seconds_is_passed_to_worker_and_validated(fake_windows, isolated_environment):
     from slidekit.config import load_common_environment
 
-    isolated_environment.write_text(
-        "schema_version = 1\n[renderers.powerpoint]\nwait_seconds = 2.5\n", encoding="utf-8"
-    )
+    isolated_environment.write_text("schema_version = 1\n[powerpoint]\nwait_seconds = 2.5\n", encoding="utf-8")
     configured = load_common_environment()
     # 既定は 600 秒。設定の値を使い、引数があれば引数を優先する。
     for environment, argument in (({}, None), (configured, None), (configured, 0)):
-        with renderers.open_session("powerpoint", environment, wait_seconds=argument):
+        with renderers.open_session(environment, wait_seconds=argument):
             pass
     assert [float(worker.option("-WaitSeconds")) for worker in fake_windows.workers] == [600.0, 2.5, 0.0]
     # 0 以上の有限の秒数でなければ、作業プロセスを起動しない（設定ファイルの値は読み込みでも拒否する。test_environment.py）。
@@ -665,10 +624,10 @@ def test_wait_seconds_is_passed_to_worker_and_validated(fake_windows, isolated_e
         ({}, float("inf")),
         ({}, True),
         ({}, "10"),
-        ({"renderers": {"powerpoint": {"wait_seconds": -1}}}, None),
+        ({"powerpoint": {"wait_seconds": -1}}, None),
     ):
         with pytest.raises(renderers.RendererError) as error:
-            with renderers.open_session("powerpoint", environment, wait_seconds=argument):
+            with renderers.open_session(environment, wait_seconds=argument):
                 pass
         assert error.value.code == "invalid_renderer"
     assert len(fake_windows.workers) == 3
@@ -718,10 +677,9 @@ def test_status_parses_worker_result(tmp_path, maintenance):
         "abandoned": True,
         "state_dir": "W:\\state",
     }
-    status = renderers.renderer_status("powerpoint", {}, state_dir=tmp_path / "state")
+    status = renderers.renderer_status({}, state_dir=tmp_path / "state")
     assert status == {
         "command": "renderer status",
-        "renderer": "powerpoint",
         "status": "pending",
         "busy": False,
         "holder": None,
@@ -749,11 +707,11 @@ def test_status_parses_worker_result(tmp_path, maintenance):
         "pending_exists": False,
         "powerpoint_running": True,
     }
-    busy = renderers.renderer_status("powerpoint", {})
+    busy = renderers.renderer_status({})
     assert (busy["status"], busy["holder"], busy["exit_code"]) == ("busy", HOLDER_VIEW, 1)
     # 読み込みに失敗した残存記録も残存記録として扱う。何もなければ idle。
     maintenance.value = {"ok": True, "busy": False, "pending": None, "pending_exists": True}
-    assert renderers.renderer_status("powerpoint", {})["status"] == "pending"
+    assert renderers.renderer_status({})["status"] == "pending"
     maintenance.value = {
         "ok": True,
         "busy": False,
@@ -761,13 +719,10 @@ def test_status_parses_worker_result(tmp_path, maintenance):
         "pending_exists": False,
         "powerpoint_running": False,
     }
-    idle = renderers.renderer_status("powerpoint", {})
+    idle = renderers.renderer_status({})
     assert (idle["status"], idle["exit_code"], idle["abandoned"]) == ("idle", 0, False)
-    # 作業フォルダーは毎回消す。LibreOffice は PowerShell を使わない。
+    # 作業フォルダーは毎回消す。
     assert not list((maintenance.temporary / "slidekit").iterdir())
-    count = len(maintenance.commands)
-    assert renderers.renderer_status("libreoffice", {})["status"] == "idle"
-    assert len(maintenance.commands) == count
 
 
 def test_clear_refuses_when_worker_reports_busy_or_locked(maintenance):
@@ -780,7 +735,7 @@ def test_clear_refuses_when_worker_reports_busy_or_locked(maintenance):
         "removed_work_dir": False,
         "removed_old_work_dirs": 0,
     }
-    busy = renderers.clear_pending("powerpoint", {})
+    busy = renderers.clear_pending({})
     assert (busy["status"], busy["exit_code"], busy["holder"], busy["archived"]) == ("refused", 1, HOLDER_VIEW, None)
     assert "PID 1234" in busy["reason"]
     maintenance.value = {
@@ -789,17 +744,17 @@ def test_clear_refuses_when_worker_reports_busy_or_locked(maintenance):
         "pending": {"run_id": "previous"},
         "reason": "PowerPoint が検査用の複製を開いています。PowerPoint で閉じてから再実行してください。",
     }
-    locked = renderers.clear_pending("powerpoint", {}, force=True)
+    locked = renderers.clear_pending({}, force=True)
     assert (locked["status"], locked["exit_code"], locked["pending"]) == ("refused", 1, {"run_id": "previous"})
     assert "複製を開いています" in locked["reason"]
     # 結果の形が不正なら、解除できたとみなさない。作業スクリプトの失敗は例外にする。
     maintenance.value = {"ok": True, "status": "done"}
     with pytest.raises(renderers.RendererError) as error:
-        renderers.clear_pending("powerpoint", {})
+        renderers.clear_pending({})
     assert error.value.code == "renderer_protocol"
     maintenance.value = {"ok": False, "message": "解除に失敗しました。"}
     with pytest.raises(renderers.RendererError) as error:
-        renderers.clear_pending("powerpoint", {})
+        renderers.clear_pending({})
     assert error.value.code == "renderer_failed"
 
 
@@ -814,14 +769,13 @@ def test_clear_passes_force_flag(tmp_path, maintenance):
         "removed_old_work_dirs": 2,
         "pending": {"run_id": "previous"},
     }
-    cleared = renderers.clear_pending("powerpoint", {}, force=True, state_dir=tmp_path / "state")
-    renderers.clear_pending("powerpoint", {})
+    cleared = renderers.clear_pending({}, force=True, state_dir=tmp_path / "state")
+    renderers.clear_pending({})
     forced, plain = maintenance.commands
     assert forced[forced.index("-Mode") + 1] == plain[plain.index("-Mode") + 1] == "Clear"
     assert forced[-1] == "-Force" and "-Force" not in plain
     assert cleared == {
         "command": "renderer clear",
-        "renderer": "powerpoint",
         "status": "cleared",
         "reason": "残存記録を解除しました。",
         "archived": archived,
@@ -834,8 +788,7 @@ def test_clear_passes_force_flag(tmp_path, maintenance):
     }
     assert "-StopOwned" not in forced and "-StopOwned" not in plain
     maintenance.value = {"ok": True, "status": "nothing", "reason": "残存記録はありません。"}
-    assert renderers.clear_pending("powerpoint", {})["exit_code"] == 0
-    assert renderers.clear_pending("libreoffice", {})["status"] == "nothing"
+    assert renderers.clear_pending({})["exit_code"] == 0
     assert len(maintenance.commands) == 3
 
 
@@ -899,7 +852,7 @@ def owned_status(**changes):
 
 def test_status_shows_powerpoint_processes_and_ownership(maintenance):
     maintenance.value = owned_status()
-    status = renderers.renderer_status("powerpoint", {})
+    status = renderers.renderer_status({})
     # slidekit が起動したと記録で確かめることができ、ウィンドウのない処理だけを --stop-owned の対象にする。
     assert status["powerpoint_processes"] == [
         {**OWNED_PROCESS, "stoppable": True},
@@ -910,12 +863,10 @@ def test_status_shows_powerpoint_processes_and_ownership(maintenance):
     # 一致してもウィンドウがあれば対象にしない。排他を持つ処理や、動いている作業プロセスがあれば、どれも対象にしない。
     windowed = {**OWNED_PROCESS, "window_title": "資料.pptx - PowerPoint", "has_window": True}
     maintenance.value = owned_status(powerpoint_processes=[windowed])
-    assert [item["stoppable"] for item in renderers.renderer_status("powerpoint", {})["powerpoint_processes"]] == [
-        False
-    ]
+    assert [item["stoppable"] for item in renderers.renderer_status({})["powerpoint_processes"]] == [False]
     for changes in ({"busy": True, "holder": ACTIVE}, {"pending_process_alive": True}):
         maintenance.value = owned_status(**changes)
-        processes = renderers.renderer_status("powerpoint", {})["powerpoint_processes"]
+        processes = renderers.renderer_status({})["powerpoint_processes"]
         assert [(item["owned"], item["stoppable"]) for item in processes] == [(True, False), (False, False)]
     # 残存記録がなくても、前の処理が残した使用中の記録と一致する処理は対象にする。
     maintenance.value = owned_status(
@@ -925,7 +876,7 @@ def test_status_shows_powerpoint_processes_and_ownership(maintenance):
         staged_input_locked=None,
         powerpoint_processes=[{**OWNED_PROCESS, "record": "active"}],
     )
-    idle = renderers.renderer_status("powerpoint", {})
+    idle = renderers.renderer_status({})
     assert (idle["status"], idle["exit_code"]) == ("idle", 0)
     assert idle["powerpoint_processes"][0]["stoppable"] is True
     # 1 件の配列が要素だけになった結果と、不正な値も扱う。一致しない処理の record は None にする。
@@ -933,11 +884,9 @@ def test_status_shows_powerpoint_processes_and_ownership(maintenance):
         powerpoint_processes={**USER_PROCESS, "record": "pending", "pid": True},
         powerpoint_records="x",
     )
-    single = renderers.renderer_status("powerpoint", {})
+    single = renderers.renderer_status({})
     assert single["powerpoint_processes"] == [{**USER_PROCESS, "pid": None, "stoppable": False}]
     assert single["powerpoint_records"] == []
-    libreoffice = renderers.renderer_status("libreoffice", {})
-    assert (libreoffice["powerpoint_processes"], libreoffice["powerpoint_records"]) == (None, None)
 
 
 def test_clear_stop_owned_passes_flag_and_reports_stopped(maintenance):
@@ -951,14 +900,14 @@ def test_clear_stop_owned_passes_flag_and_reports_stopped(maintenance):
         "pending": OWNED_PENDING,
         "stopped": [{"pid": 5001, "started_at": "2026-11-13T01:02:03.4567890Z", "record": "pending"}],
     }
-    cleared = renderers.clear_pending("powerpoint", {}, stop_owned=True)
+    cleared = renderers.clear_pending({}, stop_owned=True)
     (command,) = maintenance.commands
     assert command[-1] == "-StopOwned" and "-Force" not in command
     assert cleared["stopped_powerpoint"] == [
         {"pid": 5001, "started_at": "2026-11-13T01:02:03.4567890Z", "record": "pending"}
     ]
     assert (cleared["status"], cleared["exit_code"]) == ("cleared", 0)
-    renderers.clear_pending("powerpoint", {}, force=True, stop_owned=True)
+    renderers.clear_pending({}, force=True, stop_owned=True)
     assert maintenance.commands[-1][-2:] == ["-Force", "-StopOwned"]
     # 確かめることができなければ断る（作業スクリプトが理由を返す）。PowerShell 5.1 が 1 件の配列を要素にした結果も一覧にする。
     maintenance.value = {
@@ -967,10 +916,9 @@ def test_clear_stop_owned_passes_flag_and_reports_stopped(maintenance):
         "reason": "残存記録に、変換に使った PowerPoint の PID と開始時刻がありません。",
         "stopped": {"pid": 5003, "started_at": None, "record": "active"},
     }
-    refused = renderers.clear_pending("powerpoint", {}, stop_owned=True)
+    refused = renderers.clear_pending({}, stop_owned=True)
     assert (refused["status"], refused["exit_code"]) == ("refused", 1)
     assert refused["stopped_powerpoint"] == [{"pid": 5003, "started_at": None, "record": "active"}]
-    assert renderers.clear_pending("libreoffice", {}, stop_owned=True)["stopped_powerpoint"] == []
 
 
 def test_cli_passes_stop_owned(monkeypatch, capsys, isolated_environment):
@@ -978,11 +926,10 @@ def test_cli_passes_stop_owned(monkeypatch, capsys, isolated_environment):
 
     seen = []
 
-    def clear(name, environment, *, force=False, stop_owned=False, **options):
-        seen.append((name, force, stop_owned))
+    def clear(environment, *, force=False, stop_owned=False, **options):
+        seen.append((force, stop_owned))
         return {
             "command": "renderer clear",
-            "renderer": name,
             "status": "cleared",
             "reason": "slidekit が起動した PowerPoint（PID 5001）を終了し、残存記録を解除しました。",
             "stopped_powerpoint": [{"pid": 5001, "started_at": "2026-11-13T01:02:03Z", "record": "pending"}],
@@ -991,10 +938,10 @@ def test_cli_passes_stop_owned(monkeypatch, capsys, isolated_environment):
 
     monkeypatch.setattr(renderers, "clear_pending", clear)
     assert cli.main(["renderer", "clear", "--stop-owned"]) == 0
-    assert seen[-1] == ("powerpoint", False, True)
+    assert seen[-1] == (False, True)
     assert "終了した PowerPoint: PID 5001（開始 2026-11-13T01:02:03Z）" in capsys.readouterr().out.splitlines()
     assert cli.main(["renderer", "clear"]) == 0
-    assert seen[-1] == ("powerpoint", False, False)
+    assert seen[-1] == (False, False)
 
 
 def next_step(lines):
@@ -1007,7 +954,7 @@ def test_status_summary_explains_powerpoint_ownership(maintenance):
     from slidekit.report import summarize
 
     maintenance.value = owned_status()
-    lines = summarize("renderer status", renderers.renderer_status("powerpoint", {})).splitlines()
+    lines = summarize("renderer status", renderers.renderer_status({})).splitlines()
     assert "  変換に使った PowerPoint: slidekit が起動（PID 5001、動作中）" in lines
     assert "PowerPoint: 起動中（2 個）" in lines
     assert "  PID 5001、ウィンドウなし、開始 2026-11-13T01:02:03.4567890Z、slidekit が起動（残存記録と一致）" in lines
@@ -1024,7 +971,7 @@ def test_status_summary_explains_powerpoint_ownership(maintenance):
         powerpoint_records=[{**owned_status()["powerpoint_records"][0], "running": False}],
     )
     maintenance.value = gone
-    lines = summarize("renderer status", renderers.renderer_status("powerpoint", {})).splitlines()
+    lines = summarize("renderer status", renderers.renderer_status({})).splitlines()
     assert "  変換に使った PowerPoint: slidekit が起動（PID 5001、終了済み）" in lines
     assert "  検査用の複製: 開かれていない" in lines
     assert next_step(lines).endswith("次の操作: slidekit renderer clear")
@@ -1034,7 +981,7 @@ def test_status_summary_explains_powerpoint_ownership(maintenance):
         ({**OWNED_PENDING, "powerpoint": {"started": False}}, "既に起動していた PowerPoint（slidekit は終了しない）"),
     ):
         maintenance.value = owned_status(pending=pending, powerpoint_processes=[USER_PROCESS], powerpoint_records=[])
-        lines = summarize("renderer status", renderers.renderer_status("powerpoint", {})).splitlines()
+        lines = summarize("renderer status", renderers.renderer_status({})).splitlines()
         assert f"  変換に使った PowerPoint: {text}" in lines
         assert next_step(lines).endswith("slidekit renderer clear --force を実行する")
     # 残存記録がなく、前の処理が残した PowerPoint があるときも示す。
@@ -1046,7 +993,7 @@ def test_status_summary_explains_powerpoint_ownership(maintenance):
         powerpoint_processes=[{**OWNED_PROCESS, "record": "active"}, USER_PROCESS],
         powerpoint_records=[],
     )
-    lines = summarize("renderer status", renderers.renderer_status("powerpoint", {})).splitlines()
+    lines = summarize("renderer status", renderers.renderer_status({})).splitlines()
     assert "slidekit が起動した PowerPoint が残っている: PID 5001" in lines
     assert (
         "  PID 5001、ウィンドウなし、開始 2026-11-13T01:02:03.4567890Z、slidekit が起動（使用中の記録と一致）" in lines
@@ -1064,7 +1011,7 @@ def test_timeout_pending_record_has_windows_paths(tmp_path, fake_windows, worker
     # 偽物が記録を書き終えてから時間切れになるよう、記録を書く場合は制限時間に余裕を持たせる。
     timeout = 1.0 if worker_wrote_record else 0.2
     with pytest.raises(renderers.RendererError) as error:
-        with renderers.open_session("powerpoint", {"renderers": {"powerpoint": {"timeout": timeout}}}) as session:
+        with renderers.open_session({"powerpoint": {"timeout": timeout}}) as session:
             session.render(source, tmp_path / "deck.pdf", label="standard")
     (worker,) = fake_windows.workers
     assert error.value.code == "renderer_timeout"
@@ -1089,7 +1036,7 @@ def test_timeout_detaches_worker_without_killing(tmp_path, fake_windows):
     source.write_bytes(b"source")
     sessions = []
     with pytest.raises(renderers.RendererError) as error:
-        with renderers.open_session("powerpoint", {"renderers": {"powerpoint": {"timeout": 0.2}}}) as session:
+        with renderers.open_session({"powerpoint": {"timeout": 0.2}}) as session:
             sessions.append(session)
             session.render(source, target)
     (worker,) = fake_windows.workers
@@ -1113,7 +1060,7 @@ def test_timeout_does_not_overwrite_previous_pending(tmp_path, fake_windows):
     source = tmp_path / "deck.pptx"
     source.write_bytes(b"source")
     with pytest.raises(renderers.RendererError) as error:
-        with renderers.open_session("powerpoint", {"renderers": {"powerpoint": {"timeout": 0.2}}}) as session:
+        with renderers.open_session({"powerpoint": {"timeout": 0.2}}) as session:
             session.render(source, tmp_path / "deck.pdf")
     assert error.value.code == "renderer_timeout"
     assert json.loads(fake_windows.pending.read_text()) == {"run_id": "previous"}
@@ -1131,7 +1078,7 @@ def test_interrupt_before_ready_kills_waiting_worker(fake_windows):
 
     fake_windows.startup = startup
     with pytest.raises(KeyboardInterrupt):
-        with renderers.open_session("powerpoint", {}, on_event=raise_interrupt):
+        with renderers.open_session({}, on_event=raise_interrupt):
             pass
     # 排他を待っているだけで PowerPoint に触れていないので、作業プロセスを終了させる。
     (worker,) = fake_windows.workers
@@ -1153,7 +1100,7 @@ def test_interrupt_after_ready_detaches_worker(tmp_path, fake_windows):
     source.write_bytes(b"source")
     sessions = []
     with pytest.raises(KeyboardInterrupt):
-        with renderers.open_session("powerpoint", {}, on_event=raise_interrupt) as session:
+        with renderers.open_session({}, on_event=raise_interrupt) as session:
             sessions.append(session)
             session.render(source, tmp_path / "deck.pdf")
     (worker,) = fake_windows.workers
@@ -1164,7 +1111,7 @@ def test_interrupt_after_ready_detaches_worker(tmp_path, fake_windows):
     assert error.value.code == "renderer_interrupted"
     # 変換していないときの中断は、後片付けを待たずに切り離す（残存記録は作らない）。
     with pytest.raises(KeyboardInterrupt):
-        with renderers.open_session("powerpoint", {}) as session:
+        with renderers.open_session({}) as session:
             session.doctor()
             raise KeyboardInterrupt
     idle = fake_windows.workers[1]

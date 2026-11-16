@@ -50,9 +50,9 @@ STYLE = {
 }
 
 
-def project(tmp_path, *, required=("powerpoint",)):
+def project(tmp_path):
     return SimpleNamespace(
-        config={"metadata": {}, "render": {"required": list(required)}},
+        config={"metadata": {}},
         root=tmp_path,
         resolve_input=lambda value: (tmp_path / value).resolve(),
     )
@@ -107,14 +107,14 @@ def ref(identifier, side, **values):
     return {"element_id": identifier, "side": side, **values}
 
 
-def write(tmp_path, elements, *, name="deck.pptx", required=("powerpoint",)):
+def write(tmp_path, elements, *, name="deck.pptx"):
     scene = {
         "schema_version": 1,
         "size": [720, 540],
         "metadata": {},
         "slides": [{"id": "page", "kind": "content", "notes": "", "elements": elements}],
     }
-    result = write_pptx(scene, project(tmp_path, required=required), tmp_path / name)
+    result = write_pptx(scene, project(tmp_path), tmp_path / name)
     with zipfile.ZipFile(tmp_path / name) as archive:
         root = etree.fromstring(archive.read("ppt/slides/slide1.xml"))
     return result, root
@@ -312,21 +312,11 @@ def test_anchored_ends_are_connected_to_sites(tmp_path):
     assert [etree.QName(child).localname for child in properties] == ["stCxn", "endCxn"]
 
 
-def test_libreoffice_connects_only_ends_on_sites(tmp_path):
-    # LibreOffice が必須の資料では、gap が 0 で at が 0.5 の端（描いた端が接続点にある端）だけを接続する。
-    elements = [
-        shape("rect", area=(300, 40, 100, 50)),
-        line("plain", (100, 65), (300, 65), end_ref=ref("rect", "left")),
-        line("gap", (100, 65), (294, 65), end_ref=ref("rect", "left", gap=6)),
-        line("at", (100, 52.5), (300, 52.5), end_ref=ref("rect", "left", at=0.25)),
-    ]
-    _, root = write(tmp_path, elements, required=("powerpoint", "libreoffice"))
-    assert [connections(root, name)[1] for name in ("plain", "gap", "at")] == [("rect", 1), None, None]
-    target = elements[0]
-    office = project(tmp_path, required=("libreoffice",))
-    assert anchored_site(ref("rect", "left", gap=0, at=0.5), target, office) == 1
-    assert anchored_site(ref("rect", "left", gap=6), target, project(tmp_path)) == 1
-    assert anchored_site(None, target, office) is None and anchored_site(ref("rect", "left"), None, office) is None
+def test_anchored_site_ignores_gap_and_position():
+    # 描いた端が接続点にない端（gap が 0 でないか at が 0.5 でない端）も接続する。端か接続先がなければ接続しない。
+    target = shape("rect", area=(300, 40, 100, 50))
+    assert anchored_site(ref("rect", "left"), target) == anchored_site(ref("rect", "left", gap=6, at=0.25), target) == 1
+    assert anchored_site(None, target) is None and anchored_site(ref("rect", "left"), None) is None
 
 
 def svg_file(path, color="#C43D3D"):
@@ -428,9 +418,8 @@ def test_dashed_box_outline(tmp_path):
     assert outline("hidden") == (True, None)
 
 
-def test_libreoffice_with_fallback_does_not_connect_math_targets(tmp_path):
-    # 数式を含む接続先は、互換画像を付ける資料でも接続する。LibreOffice が必須で互換画像を付ける資料では接続しない
-    # （互換画像の図形は数式の図形より広い長方形で、LibreOffice が引き直すと端がずれるため）。
+def test_math_targets_are_connected(tmp_path):
+    # 数式を含む接続先も接続する（互換画像を付ける資料でも同じ判定）。
     formula = shape("formula", "equation", area=(300, 40, 100, 50), text=None, content=[{"kind": "math", "text": "x"}])
     mixed = shape(
         "mixed",
@@ -445,30 +434,12 @@ def test_libreoffice_with_fallback_does_not_connect_math_targets(tmp_path):
         line("to_mixed", (350, 90), (350, 120), start_ref=ref("formula", "bottom"), end_ref=ref("mixed", "top")),
         line("to_plain", (100, 225), (300, 225), end_ref=ref("plain", "left")),
     ]
-    _, root = write(tmp_path, [formula, mixed, plain, *lines], name="powerpoint.pptx")
+    _, root = write(tmp_path, [formula, mixed, plain, *lines])
     assert [connections(root, name) for name in ("to_formula", "to_mixed", "to_plain")] == [
         [None, ("formula", 1)],
         [("formula", 2), ("mixed", 0)],
         [None, ("plain", 1)],
     ]
-    _, root = write(
-        tmp_path, [formula, mixed, plain, *lines], name="office.pptx", required=("powerpoint", "libreoffice")
-    )
-    assert [connections(root, name) for name in ("to_formula", "to_mixed", "to_plain")] == [
-        [None, None],
-        [None, None],
-        [None, ("plain", 1)],
-    ]
-    # 判定は設定の互換画像の要否による：互換画像を付けない設定（off）なら、LibreOffice が必須でも数式の接続先を接続する。
-    office = project(tmp_path, required=("libreoffice",))
-    assert anchored_site(ref("formula", "left"), formula, office) is None
-    office.config["math"] = {"fallback": "off"}
-    assert anchored_site(ref("formula", "left"), formula, office) == 1
-    office.config["math"] = {"fallback": "required"}
-    assert anchored_site(ref("plain", "left"), plain, office) == 1
-    powerpoint = project(tmp_path)
-    powerpoint.config["math"] = {"fallback": "required"}
-    assert anchored_site(ref("formula", "left"), formula, powerpoint) == 1
 
 
 class LayoutFonts(FakeFonts):
@@ -817,7 +788,7 @@ def test_group_extents_include_a_callout_written_last(tmp_path):
 def test_callout_with_math_and_validation(tmp_path):
     fonts = FakeFonts()
     note = callout("note", (300, 100, 160, 60), side="left", at=0.3)
-    note["content"] = [{"kind": "text", "text": "更新 "}, {"kind": "math", "text": "H_e"}]
+    note["content"] = [{"kind": "text", "text": "比べる "}, {"kind": "math", "text": "x_i"}]
     elements = [
         group("diagram"),
         shape("diagram/first", area=(40, 300, 100, 50), parent="diagram"),

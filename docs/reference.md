@@ -99,7 +99,7 @@
 |---|---|
 | `actual_area` | しっぽまでを含む外接長方形（枠線の太さは含めない）。`area` は本体のまま |
 | `outside_parts` | 本体の外へ出る部分の列。吹き出しでは `{"part": "tail", "area": しっぽの 3 頂点の外接長方形}` の 1 つ |
-| `tail` | `side`（辺）、`at`（角丸の弧を避けて寄せた後の付け根の位置）、`width_pt`・`length_pt`（書式にないときは既定値で補う）、`points`（付け根・先端・付け根。左右の辺は上から下、上下の辺は左から右）、`target`（`tail_toward` で指した先。`anchor()` は接続先と同じ形、座標は `{"point": [x, y]}`） |
+| `tail` | `side`（辺）、`at`（角丸の弧を避けて寄せた後の付け根の位置）、`width_pt`・`length_pt`（書式にないときは既定値で補う）、`points`（付け根・先端・付け根。左右の辺は上から下、上下の辺は左から右）、`tip_shift_pt`（`tail_toward` の点が付け根の正面にないとき、先端を点の方へ辺に沿ってずらした量。左右の辺は下向き、上下の辺は右向きが正。ずらさないときは入れない）、`target`（`tail_toward` で指した先。`anchor()` は接続先と同じ形、座標は `{"point": [x, y]}`） |
 
 `actual_area` は画像と図形で意味が違う。
 
@@ -138,10 +138,7 @@
 | `inputs.documents` | `id` と `path` と任意の `affects_content`（既定 `true`）を持つ表の配列。`affects_content` を `false` にした文書はページの内容に影響しない参考の文書として、生成記録の照合（`input_changed`）と内容の確認の証拠から外す | `[]` | 元資料。出典の `document_id` で参照する |
 | `inputs.bibliography` | `.bib` のパスの配列 | `[]` | 文献ファイル。追加依存 `bibliography` が要る |
 | `inputs.asset_dirs` | パスの配列 | `[]` | 素材のディレクトリ |
-| `render.primary` | `powerpoint`・`libreoffice` | `"powerpoint"` | 主表示ソフト。下書きと `deck.pdf` に使う |
-| `render.required` | 表示ソフトの配列 | `["powerpoint"]` | 表示を確かめる表示ソフト |
-| `math.fallback` | `auto`・`required`・`off` | `"auto"` | 数式の互換画像を付けるか（[雛形と数式の互換画像](usage.md#雛形と数式の互換画像)） |
-| `math.fallback_renderer` | `"powerpoint"` | `"powerpoint"` | 互換画像を作る表示ソフト。`powerpoint` だけを受け付ける（旧版の設定のために残す） |
+| `math.fallback` | `required`・`off` | `"off"` | 数式の互換画像を付けるか（[雛形と数式の互換画像](usage.md#雛形と数式の互換画像)） |
 | `math.fallback_scale` | 1 より大きく 8 以下の数 | `4` | 互換画像の倍率（1 pt あたりの画素数） |
 | `math.functions` | 英字だけの名前の配列 | `[]` | 資料に固有の関数名（立体の関数名にする） |
 | `images.raster_scale` | 1 以上 16 以下の数 | `2` | PDF・SVG を PNG にするときの 1 pt あたりの画素数 |
@@ -268,11 +265,9 @@ URL・DOI・arXiv の番号の中は候補にしない。題名は検査し、�
 | `fonts.<書体>.index` | 0 以上の整数 | `0` | TTC の中の書体の番号 |
 | `fonts.<書体>.bold_path` | フォントファイルのパス | 自動で探した結果 | 太字のフォントファイル。太字の文字を使う書体では必須 |
 | `fonts.<書体>.bold_index` | 0 以上の整数 | `0` | 太字の書体の番号 |
-| `renderers.powerpoint.powershell` | 実行ファイル | `"powershell.exe"` | PowerShell |
-| `renderers.powerpoint.timeout` | 正の秒数 | `90` | 1 回の変換の制限時間 |
-| `renderers.powerpoint.wait_seconds` | 0 以上の秒数 | `600` | 別の変換が終わるのを待つ上限。`--wait` が優先する。`0` は待たない |
-| `renderers.libreoffice.executable` | 実行ファイル | `"libreoffice"` | LibreOffice |
-| `renderers.libreoffice.timeout` | 正の秒数 | `90` | 1 回の変換の制限時間 |
+| `powerpoint.powershell` | 実行ファイル | `"powershell.exe"` | PowerShell |
+| `powerpoint.timeout` | 正の秒数 | `90` | 1 回の変換の制限時間 |
+| `powerpoint.wait_seconds` | 0 以上の秒数 | `600` | 別の変換が終わるのを待つ上限。`--wait` が優先する。`0` は待たない |
 
 既定の書体の候補は Yu Gothic UI、Yu Gothic、Arial、Cambria Math、Calibri、Segoe UI、Meiryo、BIZ UDGothic である。テーマが使う書体のうち、`fonts` に指定がなく候補にあるものだけを探す。
 候補にない書体は自動では探さないので、`fonts.<書体>.path` を指定する。
@@ -280,7 +275,7 @@ URL・DOI・arXiv の番号の中は候補にしない。題名は検査し、�
 ```toml
 font_directories = ["/mnt/c/Windows/Fonts"]
 
-[renderers.powerpoint]
+[powerpoint]
 timeout = 120
 wait_seconds = 300
 

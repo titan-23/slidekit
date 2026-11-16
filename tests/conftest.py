@@ -220,20 +220,20 @@ def render_fixture_pdf(input_pptx, output_pdf, *, font):
 class FakeSession:
     """`renderers.open_session()` の偽物が返すセッション。事前確認は固定の値、変換は render_fixture_pdf で行う。"""
 
-    def __init__(self, calls, name, font):
-        self.calls, self.name, self.font = calls, name, font
+    def __init__(self, calls, font):
+        self.calls, self.font = calls, font
         self.renders = 0
         self.closed = False
 
     def doctor(self):
-        self.calls.doctors.append(self.name)
+        self.calls.doctors += 1
         if self.calls.on_doctor is not None:
-            self.calls.on_doctor(self.name)
+            self.calls.on_doctor()
         return {
             "ok": True,
-            "renderer": self.name,
+            "renderer": "powerpoint",
             "version": "fixture-1",
-            "executable": f"{self.name}-fixture",
+            "executable": "powerpoint-fixture",
             "windows_user_sid": "S-1-5-21-fixture",
             "font_matches": [],
         }
@@ -244,18 +244,16 @@ class FakeSession:
         input_pptx, output_pdf = Path(input_pptx), Path(output_pdf)
         if output_pdf.exists():
             raise FileExistsError(f"PDF 出力先には新しいパスを指定する: {output_pdf}")
-        self.calls.renders.append(
-            {"renderer": self.name, "label": label, "input": input_pptx, "input_sha256": file_hash(input_pptx)}
-        )
+        self.calls.renders.append({"label": label, "input": input_pptx, "input_sha256": file_hash(input_pptx)})
         if self.calls.on_render is not None:
-            self.calls.on_render(self.name, label, input_pptx, output_pdf)
+            self.calls.on_render(label, input_pptx, output_pdf)
         render_fixture_pdf(input_pptx, output_pdf, font=self.font)
         self.renders += 1
         return {
-            "renderer": self.name,
+            "renderer": "powerpoint",
             "version": "fixture-1",
             "build": "1",
-            "executable": f"{self.name}-fixture",
+            "executable": "powerpoint-fixture",
             "label": label,
             "elapsed_seconds": 0.0,
             "input_sha256": file_hash(input_pptx),
@@ -265,8 +263,8 @@ class FakeSession:
     def close(self):
         if not self.closed:
             self.closed = True
-            self.calls.closed.append(self.name)
-        return {"renderer": self.name, "closed": True}
+            self.calls.closed += 1
+        return {"closed": True}
 
     @property
     def operations(self):
@@ -275,23 +273,21 @@ class FakeSession:
 
 @pytest.fixture
 def fake_session(monkeypatch, dejavu):
-    """生成の流れの表示ソフトを偽の変換セッションに差し替え、呼び出しを記録する。
+    """生成の流れの変換セッションを偽物に差し替え、呼び出しを記録する。
 
-    戻り値の sessions に開いたセッション（名前と引数）、doctors に事前確認、renders に変換（表示ソフト・label・入力）、
-    closed に閉じたセッションが入る。on_open・on_doctor・on_render に関数を入れると、その時点で呼ぶ（例外を出せば失敗を再現できる）。
+    戻り値の sessions に開いたセッション（引数）、doctors に事前確認の回数、renders に変換（label・入力）、
+    closed に閉じたセッションの数が入る。on_open・on_doctor・on_render に関数を入れると、その時点で呼ぶ（例外を出せば失敗を再現できる）。
     """
     from slidekit import pipeline
 
-    calls = SimpleNamespace(
-        sessions=[], doctors=[], renders=[], closed=[], on_open=None, on_doctor=None, on_render=None
-    )
+    calls = SimpleNamespace(sessions=[], doctors=0, renders=[], closed=0, on_open=None, on_doctor=None, on_render=None)
 
     @contextlib.contextmanager
-    def open_session(name, environment, *, wait_seconds=None, holder=None, on_event=None, state_dir=None):
-        calls.sessions.append({"name": name, "wait_seconds": wait_seconds, "holder": holder})
+    def open_session(environment, *, wait_seconds=None, holder=None, on_event=None, state_dir=None):
+        calls.sessions.append({"wait_seconds": wait_seconds, "holder": holder})
         if calls.on_open is not None:
-            calls.on_open(name, on_event)
-        session = FakeSession(calls, name, dejavu.path)
+            calls.on_open(on_event)
+        session = FakeSession(calls, dejavu.path)
         try:
             yield session
         finally:

@@ -69,16 +69,10 @@ _FALLBACK_RELATIONSHIP_VALUES = etree.XPath(
 
 
 def fallback_required(scene: dict, project: Any) -> bool:
-    """場面に数式があり、設定が互換画像を求めるときに真を返す。
-
-    互換画像を求めるのは、`math.fallback` が `required` のときと、`auto`（既定）で LibreOffice の変換が必須のときである。
-    """
+    """場面に数式があり、`math.fallback` が `required` のときに真を返す。"""
     from .validators import _has_math
 
-    config = project.config
-    mode = config.get("math", {}).get("fallback", "auto")
-    required = mode == "required" or (mode == "auto" and "libreoffice" in config.get("render", {}).get("required", []))
-    return required and any(
+    return project.config.get("math", {}).get("fallback", "off") == "required" and any(
         _has_math(element) for slide in scene.get("slides", []) for element in slide.get("elements", [])
     )
 

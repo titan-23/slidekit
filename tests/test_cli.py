@@ -111,7 +111,7 @@ def test_default_output_is_summary_and_json_flag_restores_dict(deck, monkeypatch
         "issues": [],
         "fallback_required": False,
         "environment": {},
-        "renderers": {},
+        "powerpoint": None,
         "exit_code": 0,
     }
     monkeypatch.setattr(pipeline, "doctor", lambda path, **options: result)
@@ -311,37 +311,30 @@ def test_renderer_status_without_project_uses_common_environment(
 ):
     from slidekit import renderers
 
-    isolated_environment.write_text(dejavu.environment + "[renderers.powerpoint]\ntimeout = 33\n", encoding="utf-8")
+    isolated_environment.write_text(dejavu.environment + "[powerpoint]\ntimeout = 33\n", encoding="utf-8")
     seen = []
 
-    def status(name, environment, **options):
-        seen.append((name, environment))
-        return {
-            "command": "renderer status",
-            "renderer": name,
-            "status": "busy",
-            "holder": None,
-            "pending": None,
-            "exit_code": 1,
-        }
+    def status(environment, **options):
+        seen.append((environment,))
+        return {"command": "renderer status", "status": "busy", "holder": None, "pending": None, "exit_code": 1}
 
-    def clear(name, environment, *, force=False, **options):
-        seen.append((name, environment, force))
-        return {"command": "renderer clear", "renderer": name, "status": "nothing", "reason": "", "exit_code": 0}
+    def clear(environment, *, force=False, **options):
+        seen.append((environment, force))
+        return {"command": "renderer clear", "status": "nothing", "reason": "", "exit_code": 0}
 
     monkeypatch.setattr(renderers, "renderer_status", status)
     monkeypatch.setattr(renderers, "clear_pending", clear)
     assert main(["renderer", "status"]) == 1
     assert output(capsys)[0].startswith("表示ソフトの状態: 使用中（PowerPoint）")
-    name, environment = seen[-1]
-    assert name == "powerpoint" and environment["renderers"]["powerpoint"]["timeout"] == 33
+    (environment,) = seen[-1]
+    assert environment["powerpoint"]["timeout"] == 33
     # 資料を指定すると、その資料の実行環境（共通の設定を含む）を読む。
-    assert main(["renderer", "status", "--project", str(deck), "--renderer", "libreoffice", "--json"]) == 1
-    name, environment = seen[-1]
-    assert name == "libreoffice" and "DejaVu Sans" in environment["fonts"]
+    assert main(["renderer", "status", "--project", str(deck), "--json"]) == 1
+    (environment,) = seen[-1]
+    assert environment["powerpoint"]["timeout"] == 33 and "DejaVu Sans" in environment["fonts"]
     assert json.loads(output(capsys)[0])["status"] == "busy"
     assert main(["renderer", "clear", "--force"]) == 0
-    assert seen[-1][2] is True and output(capsys)[0] == "残存記録の解除: 解除する記録なし\n結果: 成功（終了コード 0）\n"
+    assert seen[-1][1] is True and output(capsys)[0] == "残存記録の解除: 解除する記録なし\n結果: 成功（終了コード 0）\n"
 
 
 # ---------------------------------------------------------------- 検査・反映・整理
@@ -452,13 +445,12 @@ def test_review_commands_record_accept_and_revoke(tmp_path):
     assert main(["check", *build, "--final"]) == 1
 
 
-def test_review_record_passes_page_renderer_and_variant(tmp_path):
+def test_review_record_passes_page_and_variant(tmp_path):
     run = fixture_run(tmp_path, pages=("intro", "method"), fallback=("method",))
     command = ["review", "record", "--build", str(run), *REVIEWER, "--note", "表示を確認"]
-    # 確認対象にない表示ソフト・互換表示が要らないページ・ないページは、記録せずに失敗する。
+    # 互換表示が要らないページ・ないページは、記録せずに失敗する。
     assert main([*command, "--kind", "visual", "--slides", "missing"]) == 2
     assert main([*command, "--kind", "visual", "--slides", "intro", "--variant", "fallback"]) == 2
-    assert main([*command, "--kind", "visual", "--slides", "intro", "--renderer", "libreoffice"]) == 2
     assert review_records(run) == []
     # 種類のカンマ区切り、範囲、--variant all。番号は元のページ番号。
     assert main([*command, "--kind", "visual,content", "--slides", "1-2", "--variant", "all", "--json"]) == 0
@@ -484,7 +476,7 @@ def test_record_requires_slides_and_rejects_latest(tmp_path, capsys):
     assert main([*command, "--build", "1", "--project", str(root), "--slides", "all"]) == 0
     out, _ = output(capsys)
     assert out.splitlines()[0].startswith("確認の記録: 記録した（1 件、b_")
-    assert "  表示（powerpoint・標準） 1 件（intro）" in out.splitlines()
+    assert "  表示（標準） 1 件（intro）" in out.splitlines()
 
 
 def test_review_status_next_commands_need_real_reviewer(tmp_path, capsys):

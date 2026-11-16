@@ -26,9 +26,6 @@ path = "template.pptx"
 layout_index = 6
 show_master_shapes = false
 
-[render]
-primary = "powerpoint"
-required = ["powerpoint"]
 
 # 数式を含むすべての要素に互換画像を付ける。
 [math]

@@ -280,7 +280,7 @@ def test_choice_ignores_fallback_and_matches_unwrapped(tmp_path):
     assert len({unwrapped.full, wrapped.full, recropped.full}) == 3
     # 互換画像だけを仮の画像にした最終形の PPTX と、その変換から切り出した最終 PPTX は、スライドの XML と関係が同じで、
     # 互換画像の中身だけが違う。標準表示の証拠は同じなので、最終形の PPTX を変換した標準表示の確認は最終 PPTX の確認になる。
-    # 互換表示（と LibreOffice の標準表示）の証拠は互換画像の中身を含むので、最終 PPTX を変換して確かめる。
+    # 互換表示の証拠は互換画像の中身を含むので、最終 PPTX を変換して確かめる。
     form, from_form = tmp_path / "final_form.pptx", tmp_path / "from_form.pptx"
     prepare_final_form(native, form)
     finalize_math(form, tmp_path / "first.pdf", from_form)
@@ -289,13 +289,12 @@ def test_choice_ignores_fallback_and_matches_unwrapped(tmp_path):
     temporary, finished = (pptx_pages(path)["m"] for path in (form, from_form))
     assert finished == wrapped
     assert temporary.choice == finished.choice and temporary.full != finished.full
-    assert visual_digest(temporary, "powerpoint", "standard", ENVIRONMENT, render_date=DATE) == visual_digest(
-        finished, "powerpoint", "standard", ENVIRONMENT, render_date=DATE
+    assert visual_digest(temporary, "standard", ENVIRONMENT, render_date=DATE) == visual_digest(
+        finished, "standard", ENVIRONMENT, render_date=DATE
     )
-    for renderer, variant in (("powerpoint", "fallback"), ("libreoffice", "standard")):
-        assert visual_digest(temporary, renderer, variant, ENVIRONMENT, render_date=DATE, number=1) != visual_digest(
-            finished, renderer, variant, ENVIRONMENT, render_date=DATE, number=1
-        )
+    assert visual_digest(temporary, "fallback", ENVIRONMENT, render_date=DATE, number=1) != visual_digest(
+        finished, "fallback", ENVIRONMENT, render_date=DATE, number=1
+    )
     # p:grpSp の中の mc:AlternateContent も同じ
     grouped_native = pptx_pages(group_shape(native, tmp_path / "grouped_native.pptx", "formula"))["m"]
     grouped_final = pptx_pages(group_shape(final, tmp_path / "grouped_final.pptx", "formula"))["m"]
@@ -379,50 +378,49 @@ def test_fields_only_from_displayed_shapes(tmp_path):
     assert numbered["a"].fields == ("slidenum",) == numbered["b"].fields
     # フィールドがあると番号が証拠に入る。なければ番号によらない
     moved = replace(numbered["a"], number=2)
-    assert visual_digest(numbered["a"], "powerpoint", "standard", ENVIRONMENT, render_date=DATE) != visual_digest(
-        moved, "powerpoint", "standard", ENVIRONMENT, render_date=DATE
+    assert visual_digest(numbered["a"], "standard", ENVIRONMENT, render_date=DATE) != visual_digest(
+        moved, "standard", ENVIRONMENT, render_date=DATE
     )
-    assert visual_digest(plain["a"], "powerpoint", "standard", ENVIRONMENT, render_date=DATE) == visual_digest(
-        replace(plain["a"], number=2), "powerpoint", "standard", ENVIRONMENT, render_date=DATE
+    assert visual_digest(plain["a"], "standard", ENVIRONMENT, render_date=DATE) == visual_digest(
+        replace(plain["a"], number=2), "standard", ENVIRONMENT, render_date=DATE
     )
     # 日付のフィールドがあれば生成した日も入る
     dated = replace(numbered["a"], fields=("datetime1", "slidenum"))
-    assert visual_digest(dated, "powerpoint", "standard", ENVIRONMENT, render_date="2026-10-12") != visual_digest(
-        dated, "powerpoint", "standard", ENVIRONMENT, render_date="2026-10-13"
+    assert visual_digest(dated, "standard", ENVIRONMENT, render_date="2026-10-12") != visual_digest(
+        dated, "standard", ENVIRONMENT, render_date="2026-10-13"
     )
-    assert visual_digest(
-        numbered["a"], "powerpoint", "standard", ENVIRONMENT, render_date="2026-10-12"
-    ) == visual_digest(numbered["a"], "powerpoint", "standard", ENVIRONMENT, render_date="2026-10-13")
+    assert visual_digest(numbered["a"], "standard", ENVIRONMENT, render_date="2026-10-12") == visual_digest(
+        numbered["a"], "standard", ENVIRONMENT, render_date="2026-10-13"
+    )
 
 
-def test_visual_digest_uses_choice_only_for_powerpoint_standard():
+def test_visual_digest_uses_choice_only_for_standard():
     parts = PageParts("a", 1, "c" * 64, "f" * 64, None, ())
     other_choice, other_full = replace(parts, choice="d" * 64), replace(parts, full="g" * 64)
 
-    def digest(item, renderer, variant):
-        return visual_digest(item, renderer, variant, ENVIRONMENT, render_date=DATE, number=1)
+    def digest(item, variant):
+        return visual_digest(item, variant, ENVIRONMENT, render_date=DATE, number=1)
 
-    assert digest(other_choice, "powerpoint", "standard") != digest(parts, "powerpoint", "standard")
-    assert digest(other_full, "powerpoint", "standard") == digest(parts, "powerpoint", "standard")
-    for renderer, variant in (("libreoffice", "standard"), ("powerpoint", "fallback")):
-        assert digest(other_choice, renderer, variant) == digest(parts, renderer, variant)
-        assert digest(other_full, renderer, variant) != digest(parts, renderer, variant)
-    assert digest(parts, "powerpoint", "standard") != digest(parts, "powerpoint", "fallback")
-    assert visual_digest(parts, "powerpoint", "standard", ENVIRONMENT, render_date=DATE) != visual_digest(
-        parts, "powerpoint", "standard", "0" * 64, render_date=DATE
+    assert digest(other_choice, "standard") != digest(parts, "standard")
+    assert digest(other_full, "standard") == digest(parts, "standard")
+    assert digest(other_choice, "fallback") == digest(parts, "fallback")
+    assert digest(other_full, "fallback") != digest(parts, "fallback")
+    assert digest(parts, "standard") != digest(parts, "fallback")
+    assert visual_digest(parts, "standard", ENVIRONMENT, render_date=DATE) != visual_digest(
+        parts, "standard", "0" * 64, render_date=DATE
     )
     with pytest.raises(ValueError, match="表示方法"):
-        visual_digest(parts, "powerpoint", "native", ENVIRONMENT, render_date=DATE)
+        visual_digest(parts, "native", ENVIRONMENT, render_date=DATE)
 
 
 def test_fallback_evidence_uses_position_in_clone():
     numbered = PageParts("formula", 5, "c" * 64, "f" * 64, None, ("slidenum",))
     # 確認用複製は数式のページだけなので、資料の中の位置ではなく複製の中の位置を明示する
     with pytest.raises(ValueError, match="確認用複製"):
-        visual_digest(numbered, "powerpoint", "fallback", ENVIRONMENT, render_date=DATE)
+        visual_digest(numbered, "fallback", ENVIRONMENT, render_date=DATE)
 
     def fallback(item, number):
-        return visual_digest(item, "powerpoint", "fallback", ENVIRONMENT, render_date=DATE, number=number)
+        return visual_digest(item, "fallback", ENVIRONMENT, render_date=DATE, number=number)
 
     assert fallback(numbered, 2) == fallback(replace(numbered, number=7), 2)
     assert fallback(numbered, 2) != fallback(numbered, 3)
@@ -465,7 +463,7 @@ def test_display_environment_ignores_used_font_subset():
     }
     # 実行環境で宣言したフォント。計測で使ったフォントの一覧（registry.inventory()）は引数に取らない
     declared = {"Arial": {"sha256": "f1", "index": 0, "bold_sha256": "f2", "bold_index": 0}}
-    base = display_environment("powerpoint", detected, actual, declared, "1.28.2")
+    base = display_environment(detected, actual, declared, "1.28.2")
     unchanged = [
         # 登録された書体と状態のフォルダー（使う書体が増えると登録の一覧も増える）
         {
@@ -477,10 +475,9 @@ def test_display_environment_ignores_used_font_subset():
         {**detected, "font_matches": list(reversed(detected["font_matches"]))},
     ]
     for value in unchanged:
-        assert display_environment("powerpoint", value, actual, declared, "1.28.2") == base
+        assert display_environment(value, actual, declared, "1.28.2") == base
     assert (
         display_environment(
-            "powerpoint",
             detected,
             {**actual, "elapsed_seconds": 9.0, "input_sha256": "i2", "output_sha256": "o2"},
             declared,
@@ -488,24 +485,20 @@ def test_display_environment_ignores_used_font_subset():
         )
         == base
     )
-    assert display_environment("powerpoint", detected, actual, declared, "1.28.2", scale=2) == base
+    assert display_environment(detected, actual, declared, "1.28.2", scale=2) == base
     changed = [
-        display_environment("powerpoint", detected, actual, {"Arial": {**declared["Arial"], "sha256": "f9"}}, "1.28.2"),
+        display_environment(detected, actual, {"Arial": {**declared["Arial"], "sha256": "f9"}}, "1.28.2"),
+        display_environment(detected, actual, {**declared, "Meiryo": {"sha256": "m1", "index": 0}}, "1.28.2"),
+        display_environment({**detected, "version": "16.0.2"}, actual, declared, "1.28.2"),
+        display_environment(detected, {**actual, "build": "19001"}, declared, "1.28.2"),
         display_environment(
-            "powerpoint", detected, actual, {**declared, "Meiryo": {"sha256": "m1", "index": 0}}, "1.28.2"
-        ),
-        display_environment("powerpoint", {**detected, "version": "16.0.2"}, actual, declared, "1.28.2"),
-        display_environment("powerpoint", detected, {**actual, "build": "19001"}, declared, "1.28.2"),
-        display_environment(
-            "powerpoint",
             {**detected, "font_matches": [font_match("Arial", "regular", "a9"), font_match("Arial", "bold", "a2")]},
             actual,
             declared,
             "1.28.2",
         ),
-        display_environment("powerpoint", detected, actual, declared, "1.28.3"),
-        display_environment("powerpoint", detected, actual, declared, "1.28.2", scale=4),
-        display_environment("libreoffice", detected, actual, declared, "1.28.2"),
+        display_environment(detected, actual, declared, "1.28.3"),
+        display_environment(detected, actual, declared, "1.28.2", scale=4),
     ]
     assert base not in changed and len(set(changed)) == len(changed)
 

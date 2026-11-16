@@ -129,7 +129,7 @@ def test_real_choice_equals_unwrapped_math(tmp_path, write_deck, windows_fonts_e
     assert native.is_file()
     output = tmp_path / "native" / "deck.pdf"
     output.parent.mkdir()
-    with renderers.open_session("powerpoint", load_project(root).environment) as session:
+    with renderers.open_session(load_project(root).environment) as session:
         session.render(native, output, label="native")
     with open_pdf(output) as document:
         assert len(document) == len(record["slides"])
