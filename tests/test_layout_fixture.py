@@ -74,6 +74,7 @@ PAGES = (
     "wrap_math",
     "explicit_wrap",
     "shapes",
+    "callouts",
     "math_lines",
     "math_stack",
     "math_stack_more",

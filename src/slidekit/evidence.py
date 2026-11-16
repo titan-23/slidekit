@@ -693,6 +693,11 @@ def _content_value(slide: Mapping, project) -> dict:
             item["image"] = [_image_digest(element, project), element.get("page")]
         if element.get("kind") in ("line", "arrow"):
             item["connections"] = [_connection(element.get("start_ref")), _connection(element.get("end_ref"))]
+        tail = element.get("tail")
+        target = tail.get("target") if isinstance(tail, Mapping) else None
+        if isinstance(target, Mapping) and target.get("element_id") is not None:
+            # しっぽで指した要素（tail_toward）。しっぽの辺・位置・寸法は座標と同じく内容に入れない。
+            item["tail_target"] = target["element_id"]
         if "row_keys" in element or "column_keys" in element:
             item["table"] = [element.get("row_keys"), element.get("column_keys")]
         for source in item["sources"]:

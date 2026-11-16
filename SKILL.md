@@ -133,7 +133,7 @@ def build(context):
 |---|---|---|
 | `deck.slide` | `id` | `kind`（`cover`・`section`・`content`・`references`・`blank`）、`title`、`notes`、`seconds`、`allow_roles`、`decorations` |
 | `slide.text` | `id`、`text`、`area` | `role`、書式、`sources` |
-| `slide.box` | `id`、`area` | `text`、`shape`（`rectangle`・`rounded_rectangle`・`ellipse`・`diamond`）、`role`、書式 |
+| `slide.box` | `id`、`area` | `text`、`shape`（`rectangle`・`rounded_rectangle`・`ellipse`・`diamond`）、`role`、書式、`tail_toward`（吹き出しのしっぽを向ける点。別の要素の `anchor()` か `(x, y)`） |
 | `slide.equation` | `id`、`area`、`expression` | `align`、書式。数式だけなら独立した数式になる |
 | `slide.line`・`slide.arrow` | `id`、`start`、`end` | `line_color`・`line_width_pt`・`dashed`。端は `(x, y)` か `要素.anchor(side, gap=0, at=0.5)` |
 | `slide.image` | `id`、`path`、`area` | `fit`（`contain`・`cover`）、`page`（PDF は必須。1 始まり）、`vector`（SVG だけ。PDF は PNG にするので、劣化させたくない図は SVG にする） |
@@ -155,6 +155,7 @@ def build(context):
 - 文字は枠の幅で自動的に折り返す。自動では縮小しない（はみ出すと `text_overflow`）。1 行で収めたい要素は `word_wrap=False` にする。改行 `\n` は意味の区切りだけに入れる。
 - 役割（`role`）: `slide_title`・`heading`（24 pt）・`body`（20 pt、既定）・`note`（14 pt）など。各役割に最小文字サイズがあり、下回るとエラーになる。小さい文字は最小値の低い役割をテーマで定義し、`restricted = true` と `allow_roles` で使う場所を限る。
 - 書式の引数: `size_pt`・`color`・`bold`・`align`（`left`・`center`・`right`・`justify`）・`valign`（`top`・`middle`・`bottom`）・`line_spacing`・`padding_pt`・`fill`・`line_color`・`line_width_pt`・`dashed`・`corner_radius_pt`（角丸の箱だけ。同梱テーマの既定は 6）。色はテーマの色の名前か 6 桁の 16 進数で書く。
+- 吹き出し: `slide.box` の書式 `tail_side`（`left`・`right`・`top`・`bottom`。`none` で役割のしっぽを取り消す）で、本体の辺にしっぽを付ける。`tail_at`（辺の上の位置 0〜1、既定 0.5）・`tail_width_pt`（既定 10）・`tail_length_pt`（既定 8）。`rectangle`・`rounded_rectangle` だけに付き、`slide.text` には付かない。`area` は本体で、しっぽは外へ出る。しっぽが相手に重なると `element_overlap` になるので、本体と相手の間を `tail_length_pt` 以上あけるか、`tail_toward` で相手を指す。しっぽのある辺には線を結ばない。役割に書けば役割だけで吹き出しにできる。
 - 重ねる順は「テーマの `[defaults]` < `[defaults.<種類>]` < 役割 < `style=` の辞書 < キーワード引数」で、後ろほど優先する。
 
 ### 数式

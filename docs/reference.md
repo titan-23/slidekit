@@ -31,10 +31,15 @@
 | `line_width_pt` | `text`・`box`・`equation`・`table_cell`・`table_header`・`line`・`arrow` | 枠線・線の太さ | 0 以上の数（pt） | `1` |
 | `dashed` | `text`・`box`・`equation`・`table_cell`・`table_header`・`line`・`arrow` | 破線にする。文字枠は枠線の色があるときだけ適用される | 真偽値 | `false` |
 | `corner_radius_pt` | `box` | 角丸の半径。`shape="rounded_rectangle"` だけに指定できる | 0 以上の数（pt） | ライブラリは図形の既定（短い辺の約 1/6）、同梱テーマは `6` |
+| `tail_side` | `box` | 吹き出しのしっぽを付ける本体の辺。`shape` が `rectangle`・`rounded_rectangle` の図形だけに付く。`none` は役割で決めたしっぽを取り消す。`[defaults]`・`[defaults.<種類>]` には書くことができない | `left`・`right`・`top`・`bottom`・`none` | しっぽなし |
+| `tail_at` | `box` | 辺の上での付け根の中心の位置（上下の辺は左端 0〜右端 1、左右の辺は上端 0〜下端 1）。角丸の弧にかからない位置へ寄せる | 0 以上 1 以下の数 | `0.5` |
+| `tail_width_pt` | `box` | しっぽの付け根の幅。辺の直線部分（辺の長さから角丸の半径の 2 倍を除いた長さ）以下にする | 正の数（pt） | `10` |
+| `tail_length_pt` | `box` | 本体の辺からしっぽの先端までの長さ | 正の数（pt） | `8` |
 
 重ねる順は「ライブラリの既定 < テーマの `[defaults]` < `[defaults.<種類>]` < 役割 < 要素の `style=` < キーワード引数」で、後ろほど優先する。
 `[defaults.<種類>]` は、表の本文のセルでは `box` → `table_cell`、見出しのセルでは `box` → `table_cell` → `table_header`、矢印では `line` → `arrow` の順に重ねる。
 `min_size_pt` は常に役割の値になる。値の `None` は「指定しない」で、下の層の値を使う。ただし文字枠を持つ要素の `fill`・`line_color` の `None` は `"none"` と同じである。
+しっぽの項目（`tail_side`・`tail_at`・`tail_width_pt`・`tail_length_pt`）は、しっぽが付く図形の書式だけに残り、ほかの要素と表のセルの書式からは除く。`tail_side` がないときは、ほかの 3 項目を使わない（[吹き出し](usage.md#吹き出し)）。
 `padding_pt` の辞書は指定した辺だけを上書きし、指定しない辺は下の層の値を引き継ぐ。
 
 画像とまとまりには書式の引数がない。表の書式の引数（`style=` とキーワード引数）は、すべてのセルの書式（表全体の層）になる（[表](usage.md#表)）。
@@ -64,7 +69,7 @@
 |---|---|---|---|
 | `deck.slide` | `id` | `kind`（`cover`・`section`・`content`・`references`・`blank`、既定 `content`）、`title`（文字列・断片・断片の列。`None` は題名なし）、`notes`（`None` は空）、`seconds`（説明時間）、`title_role`、`title_area`、`title_style`、`decorations`（偽でページ種別の飾りを置かない）、`allow_roles` | ページ |
 | `slide.text` | `id`、`text`、`area` | `role`、書式、属性、`sources` | 要素 |
-| `slide.box` | `id`、`area` | `text`、`shape`（`rectangle`・`rounded_rectangle`・`ellipse`・`diamond`、既定 `rectangle`）、`role`、書式、属性、`sources` | 要素 |
+| `slide.box` | `id`、`area` | `text`、`shape`（`rectangle`・`rounded_rectangle`・`ellipse`・`diamond`、既定 `rectangle`）、`role`、`tail_toward`（しっぽを向ける点。同じページの別の要素の `anchor()` か `(x, y)`）、書式、属性、`sources` | 要素 |
 | `slide.equation` | `id`、`area`、`expression` | `role`（既定はテーマの役割 `equation`）、書式、属性、`sources` | 要素 |
 | `slide.line`・`slide.arrow` | `id`、`start`、`end`（`(x, y)` か要素の `anchor()`） | 線の書式、属性、`sources` | 要素 |
 | `slide.image` | `id`、`path`、`area` | `fit`（`contain`・`cover`、既定 `contain`）、`page`（PDF のページ。1 始まり。PDF では必須）、`raster_scale`、`vector`、属性、`sources` | 要素 |
@@ -87,6 +92,21 @@
 `Deck` は `slide()`・`cited_keys()`（出典の文献キーを初めて現れた順に返す）・`bibliography`（文献）を持つ。
 要素は `id`・`area`（代入できる）・`anchor(side, gap=0, at=0.5)`・`measure()`・`move(dx, dy)` を持ち、`Table` はさらに `cell(行キー, 列キー)`・`row_keys`・`column_keys`・`column_widths`・`row_heights` を持つ。
 ページは `content`（本文領域）・`default_role`・`title` を持つ。
+
+しっぽのある図形（吹き出し）は、構築した場面データ（`deck.json`）の要素に次の項目を持つ。しっぽのない要素には加えない。
+
+| 項目 | 内容 |
+|---|---|
+| `actual_area` | しっぽまでを含む外接長方形（枠線の太さは含めない）。`area` は本体のまま |
+| `outside_parts` | 本体の外へ出る部分の列。吹き出しでは `{"part": "tail", "area": しっぽの 3 頂点の外接長方形}` の 1 つ |
+| `tail` | `side`（辺）、`at`（角丸の弧を避けて寄せた後の付け根の位置）、`width_pt`・`length_pt`（書式にないときは既定値で補う）、`points`（付け根・先端・付け根。左右の辺は上から下、上下の辺は左から右）、`target`（`tail_toward` で指した先。`anchor()` は接続先と同じ形、座標は `{"point": [x, y]}`） |
+
+`actual_area` は画像と図形で意味が違う。
+
+| 種類 | `actual_area` の意味 | 重なりの判定 |
+|---|---|---|
+| 画像 | `area` の内側の表示範囲 | `area` の代わりに使う |
+| 図形（吹き出し） | `area` を含む、しっぽまでの範囲 | 使わない。本体は `area`、しっぽは `outside_parts` で判定する |
 
 ## 資料の設定（deck.toml）
 
@@ -160,7 +180,8 @@
 
 ### 役割の項目
 
-役割には下の項目と [書式の引数](#書式の引数) のすべて（`fill`・`line_color`・`corner_radius_pt` などを含む）を書くことができる。役割の書式のうち、その役割を使う要素の種類が受け付ける書式だけが適用される。
+役割には下の項目と [書式の引数](#書式の引数) のすべて（`fill`・`line_color`・`corner_radius_pt`・`tail_side` などを含む）を書くことができる。役割の書式のうち、その役割を使う要素の種類が受け付ける書式だけが適用される。
+しっぽの項目は、`shape` が `rectangle`・`rounded_rectangle` の図形だけに適用され、文字・楕円・ひし形・表のセルでは適用しない（エラーにもしない）。
 
 | 項目 | 意味 | 値 |
 |---|---|---|

@@ -134,6 +134,8 @@ def build(context):
     inner.box(id="second", area=Rect(0, 0, 160, 60), shape="ellipse", text="内側の楕円", fill="E2F0D9")
     inner.text(id="note", area=Rect(0, 100, 300, 60), text="内側のまとまりの説明文")
     inner.box(id="turned", area=Rect(200, 0, 120, 60), text="回転", rotation=30, line_color="183153", dashed=True)
+    # グループの最後の子の吹き出し。しっぽ（右へ 8 pt）がグループの範囲を広げる。
+    outer.box(id="talk", area=Rect(440, 230, 152, 50), text="吹き出し", line_color="183153", tail_side="right")
     slide.box(id="after", area=Rect(40, 460, 120, 40), text="後", fill="DDE7F0")
     return deck
 """
@@ -167,6 +169,12 @@ def test_real_powerpoint_renders_grouped_shapes_like_flat_shapes(tmp_path, write
         result, pdf = write_and_render(project, data, name)
         assert result["groups"] == (2 if grouped else 0)
         variants[name] = page_marks(pdf)
+    # グループの範囲は、最後に加えた吹き出しのしっぽまでを含む（PowerPoint で開いたときのグループの枠）。
+    from pptx import Presentation
+
+    outer = next(shape for shape in Presentation(root / "grouped.pptx").slides[0].shapes if shape.name == "outer")
+    x, y, w, h = elements(scene)["outer/talk"]["actual_area"]
+    assert outer.left + outer.width >= round((x + w) * 12700) and outer.top + outer.height >= round((y + h) * 12700)
     (grouped_drawings, grouped_characters), (flat_drawings, flat_characters) = variants["grouped"], variants["flat"]
     assert len(grouped_drawings) == len(flat_drawings) and grouped_drawings
     for a, b in zip(grouped_drawings, flat_drawings):

@@ -1076,3 +1076,86 @@ def test_role_skip_checks_remove_warnings_and_info_of_that_role():
         ("text_overflow", "list"),
     ]
     assert skip_role_checks(issues, {**scene, "theme": {"roles": {}}}) == issues
+
+
+# ---- 吹き出し ----
+
+
+def callout(id="note", *, area=(300, 100, 160, 60), side="left", at=0.5, text="補足", target=None):
+    """しっぽのある box（作成 API と同じく outline.tail_outline から作る）。"""
+    from slidekit.outline import tail_outline
+
+    box = element(id, kind="box", area=area, text=text, shape="rectangle")
+    box["style"].update(fill=None, line_color="000000")
+    outline = tail_outline(area, "rectangle", side=side, at=at)
+    box["actual_area"] = list(outline.actual_area)
+    box["outside_parts"] = [{"part": name, "area": list(rect)} for name, rect in outline.outside]
+    box["tail"] = {"side": side, "at": outline.at, "width_pt": 10.0, "length_pt": 8.0}
+    if target is not None:
+        box["tail"]["target"] = {"element_id": target, "side": "right"}
+    return box
+
+
+def overlaps(issues):
+    """重なりの診断の (要素, 相手, [(部分を持つ要素, 部分)])。組の要素は識別子の順に並ぶ。"""
+    return [
+        (
+            issue["element_id"],
+            issue["related_element_id"],
+            [(observation.get("part_element_id"), observation.get("part")) for observation in issue["observations"]],
+        )
+        for issue in issues
+        if issue["code"] == "element_overlap"
+    ]
+
+
+def test_tail_outside_page_and_content_area_is_reported(project):
+    data = scene(callout(area=(4, 100, 160, 60), side="left"))
+    data["slides"][0]["content_area"] = [20, 20, 680, 500]
+    issues = validate(data, project)
+    page = issue_of(issues, "page_overflow")
+    assert page["severity"] == "error" and page["observations"][0]["area"] == [-4, 100, 168, 60]
+    assert issue_of(issues, "content_area_overflow")["observations"][0]["area"] == [-4, 100, 168, 60]
+    # しっぽがページの内側なら、本体の位置だけでははみ出さない。
+    assert "page_overflow" not in codes(validate(scene(callout(area=(8, 100, 160, 60))), project))
+    # 積み上げの領域は本体（area）で判定する。
+    inside = callout(area=(100, 100, 160, 60), side="bottom")
+    inside["layout_bounds"] = [100, 100, 160, 60]
+    assert "layout_bounds_overflow" not in codes(validate(scene(inside), project))
+
+
+def test_tail_overlap_is_reported_with_part(project):
+    # しっぽ（x 292〜300、y 125〜135）に左の文字の右端（x 296）が 4 pt 入る。本体どうしは重ならない。
+    issues = validate(scene(element("body", area=(100, 110, 196, 40)), callout()), project)
+    assert overlaps(issues) == [("body", "note", [("note", "tail")])]
+    assert issue_of(issues, "element_overlap")["observations"][0]["intersection"] == [292, 125, 4, 10]
+
+
+def test_tail_does_not_overlap_elements_beside_or_touching_it(project):
+    # 本体の外で、しっぽにも触れない要素（しっぽの上下の空き）。全体の外接長方形では判定しない。
+    beside = element("beside", area=(100, 100, 197, 20))
+    # 先端が相手の辺にちょうど接する配置。
+    touching = element("touching", area=(100, 125, 192, 20))
+    assert overlaps(validate(scene(beside, touching, callout()), project)) == []
+
+
+def test_tail_inside_a_large_frame_is_not_overlap(project):
+    assert overlaps(validate(scene(frame(area=(200, 50, 400, 300)), callout()), project)) == []
+
+
+def test_tail_crossing_lines_and_target(project):
+    crossing = arrow("crossing", (296, 90), (296, 160), kind="line")
+    passing = arrow("passing", (250, 90), (250, 160), kind="line")
+    issues = validate(scene(crossing, passing, callout()), project)
+    assert overlaps(issues) == [("crossing", "note", [("note", "tail")])]
+    # しっぽで指した要素（tail_toward）は、しっぽの重なりの判定から外す。本体が重なれば警告のまま。
+    target = element("target", area=(100, 110, 196, 40))
+    assert overlaps(validate(scene(target, callout(target="target")), project)) == []
+    body = element("target", area=(100, 110, 210, 40))
+    assert overlaps(validate(scene(body, callout(target="target")), project)) == [("note", "target", [(None, None)])]
+
+
+def test_two_tails_overlap(project):
+    first = callout("first", area=(100, 100, 100, 40), side="right")
+    second = callout("second", area=(214, 100, 100, 40), side="left")
+    assert overlaps(validate(scene(first, second), project)) == [("first", "second", [("first", "tail")])]

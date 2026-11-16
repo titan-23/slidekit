@@ -99,7 +99,7 @@ output_dir = "out"
 | 関数 | 用途 |
 |---|---|
 | `text` | 文章。文字列か `Text`・`Emphasis`・`Math` の断片の列 |
-| `box` | 図形（`rectangle`・`rounded_rectangle`・`ellipse`・`diamond`）。文章を置くことができる |
+| `box` | 図形（`rectangle`・`rounded_rectangle`・`ellipse`・`diamond`）。文章を置くことができる。書式 `tail_side` で吹き出しにする（[吹き出し](#吹き出し)） |
 | `equation` | 編集可能な Office Math の数式。数式だけなら独立した数式になる |
 | `line`・`arrow` | 座標か要素の `anchor()` を結ぶ線と矢印 |
 | `image` | PNG・JPEG・SVG・PDF の画像。PDF には 1 始まりの `page` を指定する |
@@ -179,7 +179,7 @@ slide.box(id="note", area=Rect(60, 400, 400, None), text="補足", style=callout
 - 文中の数式は、行の残りに入らないときも式の途中で改行せず、式ごと次の行へ送る。枠より長い式は右へはみ出す（`text_overflow`）。
 - 12 pt 以上の文字は欧文の書体の kern 表で字間を詰める。断片の境界でも、書体・大きさ・太さが同じで書体の区切りをまたがなければ詰める。
 - 折り返しの位置が幅の限界に近い要素は、参考の診断 `text_wrap_near_limit` で知らせる。行数は生成後の PDF の検査で確かめる。
-- 図形の文字領域は形で決まる。ひし形は外形の中央の幅・高さとも半分、楕円は約 0.71 倍、角丸の長方形は角の半径の約 0.29 倍だけ内側で、その中で折り返す。
+- 図形の文字領域は形で決まる。ひし形は外形の中央の幅・高さとも半分、楕円は約 0.71 倍、角丸の長方形は角の半径の約 0.29 倍だけ内側で、その中で折り返す。吹き出しの文字領域は本体の形で決まり、しっぽの寸法は計測に影響しない。
 - 自動で折り返した段落の最後の行が短い要素（`text_short_line`）、和文の文節の途中で折り返した要素（`text_wrap_mid_phrase`）、欧文の語のハイフンの後で折り返した要素（`text_wrap_hyphen`）は、参考の診断で知らせる。文節の境は BudouX の日本語のモデルで判定する。行の文字列は `slidekit layout --wraps` で見る。
 - 書式 `phrase_wrap=True`（テーマの `[defaults]` や役割にも書くことができる）は、和文の文字の間を文節の境だけで折り返す。内側の幅より長い文節の中は今までどおり折り返す。PowerPoint は和文の文字の間ならどこでも折り返すので、場面を作るときに、計測した折り返しの位置へ明示改行を入れて書き出す（要素の枠の幅で折り返しを固定する。PPTX を編集して幅を変えると、明示改行の位置は変わらない）。
 - 数式の描画が送り幅より左右へ張り出す分（入れ子の分数の線など）も、インクの範囲として、はみ出しと余白への入り込みの判定に使う。文字の送り（行の幅と揃え）は送り幅で決める。
@@ -329,6 +329,63 @@ PowerPoint で接続先を動かすと、両端を接続した線は両端とも
 互換画像を付ける資料でも、数式を含む図形に接続する。`render.required` に `libreoffice` がある資料では、`gap` 0・`at` 0.5 の端だけを接続し、互換画像を付けるときは数式を含む図形に接続しない（LibreOffice が読み込むときに接続線を引き直すおそれがあり、確かめていないため）。
 
 接続した線と接続先、端が図形の辺に接する線（図形への入り込みは線幅か 2 pt の大きいほうまで）は、重なりの警告の対象にしない。
+吹き出しの接続点は本体の辺の中央である。しっぽのある辺には線を結ばない（[吹き出し](#吹き出し)）。
+
+## 吹き出し
+
+`slide.box()` の書式 `tail_side` で本体の辺に小さな三角形を付けると、吹き出しになる。三角形を「しっぽ」、長方形の部分を「本体」、しっぽのとがった頂点を「先端」、本体の辺の上の 2 頂点を「付け根」と呼ぶ。
+しっぽを付けることができるのは `shape` が `rectangle`・`rounded_rectangle` の図形だけである。`slide.text()`・楕円・ひし形には付かない。
+
+```python
+# 枠線だけの補足。左の辺の上寄りにしっぽを付け、左の本文を指す
+slide.box(id="note", area=Rect(420, 150, 240, 70), text="ここで $H_e$ を更新する",
+          fill="none", line_color="text", line_width_pt=1, tail_side="left", tail_at=0.2)
+# 角丸で塗りのある吹き出し。下の辺の中央から下の要素を指す
+slide.box(id="hint", area=Rect(100, 80, 200, 50), shape="rounded_rectangle", text="最下行だけを保つ",
+          corner_radius_pt=6, fill="surface", tail_side="bottom")
+```
+
+- `tail_at` は辺の上の付け根の中心の位置（上下の辺は左端 0〜右端 1、左右の辺は上端 0〜下端 1。既定 0.5）、`tail_width_pt` は付け根の幅（既定 10）、`tail_length_pt` は辺から先端までの長さ（既定 8）である。
+  付け根は角丸の弧にかからない位置へ寄せるので、`tail_at=0` は角に最も近い位置になる。付け根の幅が辺の直線部分（辺の長さから角丸の半径の 2 倍を除いた長さ）を超えると `invalid_style` になり、しっぽを付けない。
+- `area` は本体の長方形のままで、しっぽは `area` の外へ出る。文字領域、内容から決める寸法、`anchor()`、積み上げは本体で決まる。上下の辺にしっぽを付けて積むときは、間隔を `tail_length_pt` 以上にする。
+- 役割に `tail_side` などを書くと、役割だけで吹き出しを定義できる。要素の側で `tail_side="right"`・`tail_at=0.8` などを上書きし、`tail_side="none"` でしっぽを取り消す（`tail_side=None` は指定なしで、役割の値が残る）。
+  寸法と位置はテーマの `[defaults]`・`[defaults.box]` にも書くことができるが、`tail_side` は書くことができない（すべての図形と表のセルに届くため）。
+  吹き出し向けの役割では `corner_radius_pt` も指定する。指定がないと角丸の半径が短い辺の約 1/6 になり、小さい吹き出しでは付け根が収まらないことがある。
+
+```toml
+# theme.toml
+[roles.callout]
+inherits = "note"
+fill = "none"
+line_color = "text"
+line_width_pt = 1
+padding_pt = 6
+tail_side = "left"
+tail_at = 0.2
+```
+
+`tail_toward` に同じページの別の要素の `anchor()` か座標 `(x, y)` を渡すと、しっぽの辺と付け根の位置をその点から決める。
+
+```python
+body = slide.text(id="body", area=Rect(40, 120, 340, 200), text="...")
+slide.box(id="why", area=Rect(410, 130, 220, None), text="補足", line_color="text",
+          tail_toward=body.anchor("right", at=0.2))
+```
+
+- 辺は、点が本体の外へ出ている横と縦の距離の大きい方（等しいときは左右の辺）にする。付け根の中心は点を辺へ垂直に下ろした位置で、長さは `tail_length_pt` のまま（先端は点まで伸ばさない）。
+- `style=` かキーワード引数の `tail_side` を併用すると、辺をその値に固定する。役割の `tail_side` は `tail_toward` が上書きする。`tail_at` は併用できない。配置を少し変えると辺が切り替わる位置関係では、`tail_side` を併用する。
+- 点が本体の内側にあるときと、固定した辺の外側にないときは `invalid_geometry` になり、しっぽを付けない。まとまりの子の座標は、まとまりの左上が原点である。
+
+配置の検査と書き出しは次のように扱う。
+
+- ページと本文領域のはみ出しは、しっぽまでの範囲で判定する。積み上げの領域（`layout_bounds_overflow`）は本体で判定する。
+- 重なりは本体としっぽを分けて判定する。しっぽ（3 頂点の外接長方形）がほかの要素に重なると `element_overlap` になり、観測値の `part` が `tail` になる。先端が相手の辺に接するだけなら警告しない。
+  しっぽの先端を図や表の内側へ入れると警告になる。指す相手を `tail_toward` で渡すと、その要素とのしっぽの重なりは判定しない（本体が重なれば警告する）。
+- 接続点は本体の 4 辺の中点で、しっぽの辺や位置では変わらない。しっぽのある辺に線を結ぶと線の端がしっぽの開いた部分に来るので、その辺には線を結ばない。
+- しっぽのある図形は回転・反転できない（`unsupported_argument`）。向きは `tail_side` で決める。
+- 本体としっぽは 1 つの多角形（PowerPoint の「フリーフォーム」）として書き出し、枠線の角は丸める。PowerPoint で大きさを変えると、しっぽと角丸も比率で伸縮する。調整ハンドルはない。
+- PowerPoint 16.0 の build 20527 で、文字の位置・本体の角・枠線が同じ本体のしっぽのない図形と同じに描かれ、付け根に継ぎ目が出ないことを確かめた。
+  図形の位置と大きさを変えると、接続した線は本体の辺の中央の接続点に追従し、文字領域と接続点は比率で伸縮する（画面でのドラッグは確かめていない）。
 
 ## まとまりと識別子
 
@@ -772,6 +829,7 @@ slidekit review revoke --build 1 --record r_0123456789abcdef --reviewer editor -
 - 先に作った図形の内側に、後から置いた要素。図形に文章があるときは、その文章と重ならないもの。塗りも文章もない図形の中のもの
 - まとまりとその子孫、線どうし
 - `anchor()` で結んだ線と、その接続先。端が図形の辺に接する線
+- 吹き出しのしっぽと、`tail_toward` で指した要素。しっぽを横切らない線。吹き出し全体が収まる枠（本体は通常どおり判定する）
 - `semantic="background"`・`semantic="decoration"` を付けた要素
 
 同じまとまりの中の要素どうしも検査する。枠は文字より先に作る。それ以外の意図した重なりは、[警告の許容](#警告の許容) で理由を残す。
@@ -916,7 +974,7 @@ black --check src tests examples tools
 計測を PowerPoint の表示と照合する試験は、PowerPoint で変換した PDF から計測した照合データを使う。照合データと手元のフォントのファイルが違う環境では省略する。
 PowerPoint・フォント・計測の版を変えたとき（`measure.MEASURE_VERSION` か数式の計測の版を上げたとき）に作り直し、差を確かめてから入れ替える。PowerPoint を使う作成は一度に 1 つだけ行う。
 
-- 文字の照合データ `tests/data/layout/powerpoint_layout.json`（`MEASURE_VERSION` 9、PowerPoint 16.0.20527.20150、校正用の資料の 23 ページ・382 要素）：校正用の資料 `tests/data/layout/deck/` を継承する `deck.toml` を作業用の場所に置いて `slidekit build` し、
+- 文字の照合データ `tests/data/layout/powerpoint_layout.json`（`MEASURE_VERSION` 9、PowerPoint 16.0.20527.20196、校正用の資料の 24 ページ・390 要素）：校正用の資料 `tests/data/layout/deck/` を継承する `deck.toml` を作業用の場所に置いて `slidekit build` し、
   `python tools/make_layout_fixture.py --run 実行ディレクトリ --output tests/data/layout/powerpoint_layout.json` で作る。試験は `tests/test_layout_fixture.py`（環境変数 `SLIDEKIT_LAYOUT_FIXTURE` で照合データを替えることができる）。
 - 数式の照合データ `tests/data/powerpoint_math.json`（道具の 166 式を文中と独立で置いた 332 件）：`python tests/tools/powerpoint_math_data.py --output … --work …` で作り、`python -m slidekit.math.metrics` で計測と比べる（[照合データと誤差](math.md#照合データと誤差)）。
 

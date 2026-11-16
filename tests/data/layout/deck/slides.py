@@ -550,6 +550,33 @@ def shapes(deck):
         page.box(id, text, page.place(width, height), shape=shape, align="center", tag=("c3",), **style)
 
 
+def callouts(deck):
+    page = Page(
+        deck,
+        "callouts",
+        "吹き出しの文字領域",
+        "長方形と角丸の本体の 4 辺にしっぽを付け、長い文を折り返す。文字領域がしっぽのない図形と同じであることを確かめる。",
+    )
+    style = {"size_pt": 16, "valign": "middle", "padding_pt": 6, "line_color": "183153"}
+    # しっぽ（長さ 8 pt）が隣の吹き出しやページの端に届かないように、間を 24 pt あける。
+    for row, (shape, radius, align) in enumerate((("rectangle", None, "left"), ("rounded_rectangle", 12, "center"))):
+        for column, side in enumerate(("left", "right", "top", "bottom")):
+            extra = {} if radius is None else {"corner_radius_pt": radius}
+            area = Rect(LEFT + 12 + column * 228, TOP + 16 + row * 170, 200, 140)
+            page.box(
+                f"{shape}_{side}",
+                SHAPE_TEXT,
+                area,
+                shape=shape,
+                align=align,
+                tail_side=side,
+                tail_at=0.3,
+                tag=("c3", "callout"),
+                **style,
+                **extra,
+            )
+
+
 MATH_ONLY = [
     ("square", "x^2"),
     ("fraction", r"\frac{a}{b}"),
@@ -1378,6 +1405,7 @@ def build(context):
     wrap_math(deck, ruler)
     explicit_wrap(deck)
     shapes(deck)
+    callouts(deck)
     math_lines(deck)
     math_stack(deck)
     math_stack_more(deck)

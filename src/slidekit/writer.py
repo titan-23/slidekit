@@ -27,6 +27,9 @@
 
 - 箱と文字枠の枠線は、線の色（line_color）があるときだけ書き、dashed なら破線（a:prstDash val="dash"）にする。
   線・矢印も dashed なら破線にする。
+- しっぽのある box（場面の要素に tail がある吹き出し）は、本体としっぽを 1 つの多角形（a:custGeom）にする（`_callout_shape`）。
+  a:xfrm は actual_area、輪郭は `outline.tail_outline` の結果で、文字領域（a:rect）と接続点（a:cxnLst）は本体から決める。
+  枠線の結合は a:round にする（先端の形をテンプレートのテーマに任せず、線幅の半分より外へ出さないため）。
 - 場面で pptx_group が真のまとまりは PowerPoint のグループ（p:grpSp）にし、子孫の図形を「最も近い、書き出すまとまり」の
   グループへ入れる。グループの座標変換は恒等（off = chOff、ext = chExt）で、子の座標はページ上の座標のままである。
   数式を含む要素はグループに入れない（互換画像はスライド直下の図形だけに付けるため。グループにするかは作成 API が決める）。
@@ -68,6 +71,7 @@ from .layout import Rect
 from .math.office_math import append_math, display_trailing_width, math_mode, math_options
 from .math.syntax import Function, Nary, Scripts, parse
 from .measure import MODEL, NO_LINE_END, NO_LINE_START, FontRun, font_runs, padding_insets
+from .outline import tail_outline
 
 # NS は試験が writer から読み込むので、ここでも持つ。
 from .ooxml import EMU_PER_PT, NS, tag
@@ -110,6 +114,15 @@ _FONT_SUCCESSORS = {
     "ea": ("a:cs", "a:sym", "a:hlinkClick", "a:hlinkMouseOver", "a:rtl", "a:extLst"),
     "cs": ("a:sym", "a:hlinkClick", "a:hlinkMouseOver", "a:rtl", "a:extLst"),
 }
+# 吹き出しの接続点の a:cxn（辺の名前から 位置の x・y の式の名前と、向き（60000 分の 1 度））。番号は outline.SITE_NUMBERS。
+_CALLOUT_SITES = {
+    "top": ("bHC", "bT", 16200000),
+    "left": ("bL", "bVC", 10800000),
+    "bottom": ("bHC", "bB", 5400000),
+    "right": ("bR", "bVC", 0),
+}
+# a:ln の子のうち、線の結合（a:round など）の後に置く子要素（ECMA-376 の CT_LineProperties の順）。
+_JOIN_SUCCESSORS = ("a:headEnd", "a:tailEnd", "a:extLst")
 # 既定図形の接続点の番号（DrawingML の presetShapeDefinitions の cxnLst の順）。楕円は 8 点を持つ。
 _CONNECTION_SITES = {
     "rectangle": {"top": 0, "left": 1, "bottom": 2, "right": 3},
@@ -401,6 +414,115 @@ def _set_outline(shape, style):
         shape.line.fill.background()
 
 
+def _emu(value: float) -> int:
+    return int(round(value * EMU_PER_PT))
+
+
+def callout_geometry(element: Mapping, style: Mapping):
+    """吹き出しの輪郭（`outline.Outline`）。場面の tail と本体の area から求める（書き出しと試験が同じ値を使う）。"""
+    tail = element["tail"]
+    return tail_outline(
+        element["area"],
+        element.get("shape", "rectangle"),
+        side=tail["side"],
+        at=tail["at"],
+        width_pt=tail["width_pt"],
+        length_pt=tail["length_pt"],
+        corner_radius_pt=style.get("corner_radius_pt"),
+    )
+
+
+def _custom_geometry(outline, area) -> etree._Element:
+    """吹き出しの a:custGeom。座標は actual_area の左上を原点とする EMU の整数で、位置は `*/ w 定数 W` の式にする。
+
+    式の bL・bT・bR・bB（本体の左・上・右・下）は、互換画像の処理が本体の長方形を求めるためにも使う。
+    """
+    actual = outline.actual_area
+    width, height = _emu(actual.w), _emu(actual.h)
+    x, y = actual.x, actual.y
+    body = Rect(*area)
+    text = outline.text_area
+    geometry = OxmlElement("a:custGeom")
+    etree.SubElement(geometry, tag("a", "avLst"))
+    guides = etree.SubElement(geometry, tag("a", "gdLst"))
+    for name, value, axis in (
+        ("bL", body.x - x, "w"),
+        ("bT", body.y - y, "h"),
+        ("bR", body.x + body.w - x, "w"),
+        ("bB", body.y + body.h - y, "h"),
+        ("bHC", body.x + body.w / 2 - x, "w"),
+        ("bVC", body.y + body.h / 2 - y, "h"),
+        ("tL", text.x - x, "w"),
+        ("tT", text.y - y, "h"),
+        ("tR", text.x + text.w - x, "w"),
+        ("tB", text.y + text.h - y, "h"),
+    ):
+        etree.SubElement(
+            guides, tag("a", "gd"), name=name, fmla=f"*/ {axis} {_emu(value)} {width if axis == 'w' else height}"
+        )
+    etree.SubElement(geometry, tag("a", "ahLst"))
+    connections = etree.SubElement(geometry, tag("a", "cxnLst"))
+    for side, _site in sorted(outline.sites.items(), key=lambda item: item[1][0]):
+        x_name, y_name, angle = _CALLOUT_SITES[side]
+        connection = etree.SubElement(connections, tag("a", "cxn"), ang=str(angle))
+        etree.SubElement(connection, tag("a", "pos"), x=x_name, y=y_name)
+    etree.SubElement(geometry, tag("a", "rect"), l="tL", t="tT", r="tR", b="tB")
+    path = etree.SubElement(
+        etree.SubElement(geometry, tag("a", "pathLst")), tag("a", "path"), w=str(width), h=str(height)
+    )
+    for segment in outline.segments:
+        if segment[0] in ("move", "line"):
+            node = etree.SubElement(path, tag("a", "moveTo" if segment[0] == "move" else "lnTo"))
+            etree.SubElement(node, tag("a", "pt"), x=str(_emu(segment[1] - x)), y=str(_emu(segment[2] - y)))
+        elif segment[0] == "arc":
+            _kind, rx, ry, start, sweep = segment
+            etree.SubElement(
+                path,
+                tag("a", "arcTo"),
+                wR=str(_emu(rx)),
+                hR=str(_emu(ry)),
+                stAng=str(round(start * 60000)),
+                swAng=str(round(sweep * 60000)),
+            )
+        else:
+            etree.SubElement(path, tag("a", "close"))
+    return geometry
+
+
+def _callout_shape(shapes, element: Mapping, style: Mapping):
+    """吹き出しの図形。python-pptx の自由図形で p:sp を作り、a:custGeom と a:xfrm を輪郭の値で書き直す。
+
+    自由図形は頂点を整数の EMU に丸めて位置を決めるので、a:xfrm は actual_area で上書きする。グループの範囲は、
+    `convert_to_shape` が計算し直さないので、ここで計算し直す。
+    """
+    outline = callout_geometry(element, style)
+    actual = outline.actual_area
+    left, top, width, height = _emu(actual.x), _emu(actual.y), _emu(actual.w), _emu(actual.h)
+    builder = shapes.build_freeform(0, 0, scale=1.0)
+    builder.add_line_segments([(width, 0), (width, height), (0, height)], close=True)
+    shape = builder.convert_to_shape(left, top)
+    properties = shape._element.spPr
+    properties.replace(properties.find(tag("a", "custGeom")), _custom_geometry(outline, element["area"]))
+    transform = properties.find(tag("a", "xfrm"))
+    transform.find(tag("a", "off")).set("x", str(left))
+    transform.find(tag("a", "off")).set("y", str(top))
+    transform.find(tag("a", "ext")).set("cx", str(width))
+    transform.find(tag("a", "ext")).set("cy", str(height))
+    shapes._recalculate_extents()
+    return shape
+
+
+def _round_join(shape) -> None:
+    """枠線の結合を a:round にする（枠線があるときだけ）。"""
+    line = shape._element.spPr.find(tag("a", "ln"))
+    if line is None or line.find(tag("a", "noFill")) is not None:
+        return
+    for name in ("round", "bevel", "miter"):
+        for node in line.findall(tag("a", name)):
+            line.remove(node)
+    line.insert_element_before(OxmlElement("a:round"), *_JOIN_SUCCESSORS)
+
+
 def _disable_shadow(shape):
     properties = shape._element.spPr
     effects = properties.find(tag("a", "effectLst"))
@@ -430,6 +552,11 @@ def _draw(shapes, element, functions, fonts, svg_parts=None):
     if kind in {"text", "equation"}:
         shape = shapes.add_textbox(Pt(x), Pt(y), Pt(width), Pt(height))
         _set_outline(shape, style)
+        _set_text(shape, element, functions, fonts)
+    elif kind == "box" and isinstance(element.get("tail"), Mapping):
+        shape = _callout_shape(shapes, element, style)
+        _set_outline(shape, style)
+        _round_join(shape)
         _set_text(shape, element, functions, fonts)
     elif kind == "box":
         shape = shapes.add_shape(_SHAPES[element.get("shape", "rectangle")], Pt(x), Pt(y), Pt(width), Pt(height))

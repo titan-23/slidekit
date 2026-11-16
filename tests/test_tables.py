@@ -502,3 +502,18 @@ def test_table_rejects_rotation_and_unknown_style(make_deck):
         simple(slide, row_keys=["a", "a"])
     assert caught.value.code == "invalid_element_id"
     assert not slide.elements
+
+
+def test_tail_dimensions_in_box_defaults_do_not_reach_cells(make_deck):
+    # [defaults.box] は表のセルにも重なるが、しっぽの項目はセルの書式に入らず、しっぽも付かない。
+    theme = "[defaults.box]\ntail_width_pt = 14\ntail_length_pt = 6\ntail_at = 0.3\n"
+    deck = make_deck(theme, fonts=FakeFonts())
+    slide = deck.slide(id="page")
+    simple(slide)
+    cells = [element for element in by_id(slide).values() if element.get("parent_id") == "table"]
+    assert cells and all(element["kind"] == "box" for element in cells)
+    for element in cells:
+        assert not {"tail_side", "tail_at", "tail_width_pt", "tail_length_pt"} & set(element["style"])
+        assert "tail" not in element and "outside_parts" not in element
+    with pytest.raises(InputError, match="tail_side は table_cell では使えません"):
+        simple(slide, id="other", tail_side="left")

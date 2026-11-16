@@ -520,15 +520,27 @@ class _Checker:
             return
         for name, item in value.items():
             key = f"defaults.{name}"
-            if name in styles.ALL_STYLE_KEYS:
+            if name == "tail_side":
+                self.tail_default(key)
+            elif name in styles.ALL_STYLE_KEYS:
                 self.style_value(key, name, item)
             elif name in styles.DEFAULT_KINDS:
                 if self.table(key, item):
-                    self.style_table(key, item, name)
+                    if "tail_side" in item:
+                        self.tail_default(f"{key}.tail_side")
+                    self.style_table(key, {k: v for k, v in item.items() if k != "tail_side"}, name)
             elif isinstance(item, Mapping):
                 self.unknown("defaults", name, styles.DEFAULT_KINDS)
             else:
                 self.style_names("defaults", [name], None)
+
+    def tail_default(self, key: str) -> None:
+        # [defaults] と [defaults.box] は、すべての box と表のセルに届く。しっぽの寸法だけは既定に置くことができる。
+        self.add(
+            key,
+            "は [defaults] と [defaults.<種類>] に置くことができません。しっぽの有無は役割と要素で決めます"
+            "（tail_width_pt・tail_length_pt・tail_at は既定に置くことができます）",
+        )
 
     def roles(self, value: Any) -> None:
         if not self.table("roles", value):

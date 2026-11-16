@@ -907,3 +907,57 @@ def test_math_in_group_is_rejected(tmp_path):
         prepare_final_form(grouped, tmp_path / "final_form.pptx")
     with pytest.raises(ValueError, match="スライドの直下"):
         finalize_math(grouped, pdf_pages(tmp_path / "grouped.pdf", own_math), tmp_path / "deck.pptx")
+
+
+# ---- 吹き出し ----
+
+
+def callout_element(identifier="note", area=(100, 100, 160, 60), side="left", content=None, **style):
+    """しっぽのある box（作成 API と同じく outline.tail_outline から作る）。"""
+    from slidekit.outline import tail_outline
+
+    outline = tail_outline(area, "rectangle", side=side)
+    return element(
+        identifier,
+        kind="box",
+        area=area,
+        content=content,
+        style=style,
+        shape="rectangle",
+        actual_area=list(outline.actual_area),
+        outside_parts=[{"part": name, "area": list(rect)} for name, rect in outline.outside],
+        tail={"side": side, "at": outline.at, "width_pt": 10.0, "length_pt": 8.0},
+    )
+
+
+def test_shape_region_of_callout_includes_the_tail(tmp_path):
+    path = tmp_path / "deck.pptx"
+    write_pptx(
+        scene([callout_element(content=[{"kind": "text", "text": "補足"}], line_color="183153")]),
+        project(tmp_path),
+        path,
+    )
+    tree = xml_part(path).find("p:cSld/p:spTree", NS)
+    [(_node, region)] = _shape_regions(tree)
+    # 既定図形でない図形は a:xfrm の外接矩形（しっぽまでの範囲）。枠線の外側の半分を余裕に含める。
+    assert region == {"id": "note", "box_pt": [92, 100, 260, 160], "tolerance_pt": 1.5}
+
+
+def test_callout_crop_uses_body_for_own_glyphs_and_keeps_the_tail(tmp_path):
+    note = callout_element(content=[{"kind": "math", "text": "x"}])
+
+    def draw(page):
+        # しっぽの側の帯（本体の左、a:xfrm の中）に基点がある隣の文字。下へ本体の外まで広がる。
+        page.insert_text((93, 158), "N", fontsize=40)
+        page.insert_text((110, 140), "x", fontsize=24)
+
+    data = scene([element("intro")], ("formula", [element("beside", area=(40, 120, 52, 40)), note]))
+    paths, form, final = build_final_form(tmp_path, data, draw)
+    (shape,) = form["shapes"]
+    assert shape["rectangle_pt"] == [92, 100, 260, 160]
+    (crop,) = final["crops"]
+    # 切り出しはしっぽまでの範囲（a:xfrm）を含み、隣の文字を吹き出しの文字として含めない。
+    assert crop["crop_pt"] == [92, 100, 260, 160] and not crop["clipped"]
+    # 中間 PPTX から切り出しても同じ扱いになる。
+    again = finalize_math(paths["native.pptx"], paths["final_form.pdf"], tmp_path / "again.pptx")
+    assert again["input_form"] == "native" and again["crops"][0]["crop_pt"] == crop["crop_pt"]

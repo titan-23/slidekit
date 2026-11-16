@@ -737,3 +737,22 @@ def test_phrase_wrap_inserts_breaks_at_phrase_boundaries(make_deck):
     assert written.split("\n") == [line.text.rstrip() for line in lines]
     # 指定のない要素の断片は変えない。
     assert "".join(fragment["text"] for fragment in elements["plain"]["content"]) == text
+
+
+def test_stack_places_callouts_by_body_and_rechecks_the_tail(make_deck):
+    deck = make_deck()
+    deck.project.collect_errors = True
+    slide = deck.slide(id="stack", kind="blank")
+    stack = slide.stack(Rect(48, 100, 400, None), gap=12)
+    first = stack.box(id="first", text="ABCD", tail_side="bottom", height=40)
+    second = stack.box(id="second", text="ABCD", tail_side="left", height=40)
+    # 積み上げは本体（area）で並べる。下の辺のしっぽの長さは間隔に加えない。
+    assert second.area.y == first.area.bottom + 12
+    found = by_id(deck.to_dict()["slides"][0])
+    assert found["first"]["actual_area"] == [48, 100, 400, 48]
+    assert found["second"]["tail"]["side"] == "left"
+    # 作った後に辺が短くなり、付け根が収まらなくなったときは、場面を作るときに報告してしっぽを付けない。
+    second.area = Rect(second.area.x, second.area.y, 400, 9)
+    scene = deck.to_dict()
+    assert "tail" not in by_id(scene["slides"][0])["second"]
+    assert [(issue["element_id"], issue["code"]) for issue in scene["issues"]] == [("second", "invalid_style")]

@@ -671,3 +671,170 @@ def test_math_only_lines_get_separators(tmp_path):
         for issue in validate_pptx(path, data, project(tmp_path))
         if issue["code"] in {"font_mismatch", "text_mismatch", "math_layout_mismatch"}
     ] == []
+
+
+# ---- 吹き出し ----
+
+
+def callout(identifier, area=(40, 40, 100, 50), *, side="left", at=0.5, shape_name="rectangle", **attributes):
+    """しっぽのある box の場面の要素（作成 API と同じく outline.tail_outline から作る）。"""
+    from slidekit.outline import tail_outline
+
+    element = shape(identifier, area=area, shape=shape_name, **attributes)
+    outline = tail_outline(
+        area, shape_name, side=side, at=at, corner_radius_pt=element["style"].get("corner_radius_pt")
+    )
+    element["actual_area"] = list(outline.actual_area)
+    element["outside_parts"] = [{"part": name, "area": list(rect)} for name, rect in outline.outside]
+    element["tail"] = {
+        "side": side,
+        "at": outline.at,
+        "width_pt": 10.0,
+        "length_pt": 8.0,
+        "points": [list(point) for point in outline.tail],
+    }
+    return element
+
+
+def test_callout_is_written_as_custom_geometry(tmp_path):
+    from slidekit.outline import tail_outline
+
+    rounded = callout("rounded", (300.25, 80.5, 120.5, 60.25), side="bottom", at=0.3, shape_name="rounded_rectangle")
+    rounded["style"]["corner_radius_pt"] = 6.0
+    elements = [
+        callout("note", (420, 150, 240, 70), side="left", at=0.2),
+        shape("plain", area=(40, 300, 100, 40)),
+        rounded,
+    ]
+    _, root = write(tmp_path, elements)
+    shapes = named(root)
+    # しっぽのない box は既定図形のまま。
+    assert shapes["plain"].find("p:spPr/a:prstGeom", NS).get("prst") == "rect"
+    note = shapes["note"]
+    assert note.find("p:spPr/a:prstGeom", NS) is None
+    geometry = note.find("p:spPr/a:custGeom", NS)
+    assert [etree.QName(child).localname for child in geometry] == [
+        "avLst",
+        "gdLst",
+        "ahLst",
+        "cxnLst",
+        "rect",
+        "pathLst",
+    ]
+    # a:xfrm はしっぽまでの範囲（actual_area）、a:path の座標はその左上を原点とする EMU。
+    assert transform(note, "p:spPr/a:xfrm") == {
+        "off": {"x": 412 * EMU, "y": 150 * EMU},
+        "ext": {"cx": 248 * EMU, "cy": 70 * EMU},
+    }
+    path = geometry.find("a:pathLst/a:path", NS)
+    assert (int(path.get("w")), int(path.get("h"))) == (248 * EMU, 70 * EMU)
+    points = [
+        (etree.QName(node).localname, int(node[0].get("x")) / EMU, int(node[0].get("y")) / EMU)
+        for node in path
+        if len(node)
+    ]
+    assert points == [
+        ("moveTo", 8, 0),
+        ("lnTo", 248, 0),
+        ("lnTo", 248, 70),
+        ("lnTo", 8, 70),
+        ("lnTo", 8, 19),
+        ("lnTo", 0, 14),
+        ("lnTo", 8, 9),
+        ("lnTo", 8, 0),
+    ]
+    assert etree.QName(path[-1]).localname == "close"
+    guides = {node.get("name"): node.get("fmla") for node in geometry.find("a:gdLst", NS)}
+    assert guides["bL"] == f"*/ w {8 * EMU} {248 * EMU}" and guides["bB"] == f"*/ h {70 * EMU} {70 * EMU}"
+    assert geometry.find("a:rect", NS).attrib == {"l": "tL", "t": "tT", "r": "tR", "b": "tB"}
+    # 接続点は本体の 4 辺の中点で、番号は rectangle と同じ（top=0・left=1・bottom=2・right=3）。
+    connections = [(node.get("ang"), node[0].get("x"), node[0].get("y")) for node in geometry.find("a:cxnLst", NS)]
+    assert connections == [
+        ("16200000", "bHC", "bT"),
+        ("10800000", "bL", "bVC"),
+        ("5400000", "bHC", "bB"),
+        ("0", "bR", "bVC"),
+    ]
+    # 小数の pt の座標でも、a:xfrm は actual_area と 0.1 pt 以内で一致し、角丸は a:arcTo で書く。
+    outline = tail_outline(
+        rounded["area"], "rounded_rectangle", side="bottom", at=rounded["tail"]["at"], corner_radius_pt=6
+    )
+    offset = transform(shapes["rounded"], "p:spPr/a:xfrm")
+    written = [offset["off"]["x"] / EMU, offset["off"]["y"] / EMU, offset["ext"]["cx"] / EMU, offset["ext"]["cy"] / EMU]
+    assert written == pytest.approx(list(outline.actual_area), abs=1e-4)
+    arcs = shapes["rounded"].findall(".//a:arcTo", NS)
+    assert [(arc.get("wR"), arc.get("stAng"), arc.get("swAng")) for arc in arcs] == [
+        (str(6 * EMU), str(angle), "5400000") for angle in (16200000, 0, 5400000, 10800000)
+    ]
+    # 文字領域は本体の角丸の内側（measure.text_area と同じ）。
+    text = outline.text_area
+    rounded_guides = {node.get("name"): node.get("fmla") for node in shapes["rounded"].find(".//a:gdLst", NS)}
+    width = offset["ext"]["cx"]
+    assert rounded_guides["tL"] == f"*/ w {round((text.x - outline.actual_area.x) * EMU)} {width}"
+    # 再読み込みでき、PowerPoint の自由図形として読む。
+    reloaded = {item.name: item for item in Presentation(tmp_path / "deck.pptx").slides[0].shapes}
+    assert reloaded["note"].shape_type is not None and reloaded["note"].text_frame.text == "図形"
+
+
+def test_callout_outline_uses_round_join_only_with_a_line(tmp_path):
+    framed = callout("framed")
+    framed["style"]["dashed"] = True
+    bare = callout("bare", (200, 40, 100, 50))
+    bare["style"]["line_color"] = None
+    _, root = write(tmp_path, [framed, bare])
+    shapes = named(root)
+    line = shapes["framed"].find("p:spPr/a:ln", NS)
+    assert [etree.QName(child).localname for child in line] == ["solidFill", "prstDash", "round"]
+    assert shapes["bare"].find("p:spPr/a:ln/a:round", NS) is None
+
+
+def test_lines_connect_to_callout_sites(tmp_path):
+    elements = [
+        callout("note", (300, 100, 120, 60), side="left"),
+        line("link", (100, 130), (300, 130), end_ref=ref("note", "left")),
+        line("down", (360, 160), (360, 260), start_ref=ref("note", "bottom")),
+    ]
+    result, root = write(tmp_path, elements)
+    shapes = named(root)
+    assert result["connections"] == 2
+    assert shapes["link"].find(".//a:endCxn", NS).get("idx") == "1"
+    assert shapes["down"].find(".//a:stCxn", NS).get("idx") == "2"
+
+
+def test_group_extents_include_a_callout_written_last(tmp_path):
+    elements = [
+        group("diagram"),
+        shape("diagram/first", area=(40, 60, 100, 50), parent="diagram"),
+        callout("diagram/note", (200, 60, 100, 50), side="right", parent="diagram"),
+    ]
+    _, root = write(tmp_path, elements)
+    values = transform(named(root)["diagram"], "p:grpSpPr/a:xfrm")
+    # しっぽ（右へ 8 pt）を含む範囲。
+    assert values["off"] == values["chOff"] == {"x": 40 * EMU, "y": 60 * EMU}
+    assert values["ext"] == values["chExt"] == {"cx": 268 * EMU, "cy": 50 * EMU}
+
+
+def test_callout_with_math_and_validation(tmp_path):
+    fonts = FakeFonts()
+    note = callout("note", (300, 100, 160, 60), side="left", at=0.3)
+    note["content"] = [{"kind": "text", "text": "更新 "}, {"kind": "math", "text": "H_e"}]
+    elements = [
+        group("diagram"),
+        shape("diagram/first", area=(40, 300, 100, 50), parent="diagram"),
+        callout("diagram/second", (200, 300, 100, 50), side="top", parent="diagram"),
+        note,
+        line("link", (100, 130), (300, 130), end_ref=ref("note", "left")),
+    ]
+    elements[-1]["area"] = [100, 130, 200, 0]
+    data = {
+        "schema_version": 1,
+        "size": [720, 540],
+        "metadata": {},
+        "slides": [{"id": "page", "kind": "content", "notes": "", "elements": elements}],
+    }
+    path = tmp_path / "deck.pptx"
+    write_pptx(data, project(tmp_path), path, fonts=fonts)
+    root = etree.fromstring(zipfile.ZipFile(path).read("ppt/slides/slide1.xml"))
+    assert named(root)["note"].find(".//m:oMath", NS) is not None
+    codes = {issue["code"] for issue in validate_pptx(path, data, project(tmp_path), fonts=fonts)}
+    assert not codes & {"geometry_mismatch", "connection_mismatch", "group_mismatch", "element_missing"}

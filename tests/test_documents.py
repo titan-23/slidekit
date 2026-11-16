@@ -47,7 +47,6 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCUMENTS = (
     "README.md",
     "AGENTS.md",
-    "validation.md",
     "docs/usage.md",
     "docs/reference.md",
     "docs/math.md",
@@ -239,6 +238,15 @@ def test_style_keys_are_documented():
             assert (
                 f"`{_toml_literal(value, quote=False)}`" in rows[name][4]
             ), f"書式 {name} の既定値 {value!r} が文書にない"
+    # しっぽの寸法と位置の既定値は LIBRARY_DEFAULTS でなく outline の定数で、同じ列に書く。
+    from slidekit import outline
+
+    for name, value in (
+        ("tail_at", outline.TAIL_AT),
+        ("tail_width_pt", outline.TAIL_WIDTH_PT),
+        ("tail_length_pt", outline.TAIL_LENGTH_PT),
+    ):
+        assert f"`{_toml_literal(value)}`" in rows[name][4], f"書式 {name} の既定値 {value!r} が文書にない"
     # 種類ごとの既定の表、受け付けない名前、書式を持たない種類を説明する。
     for name in styles.DEFAULT_KINDS | set(styles.UNSUPPORTED):
         assert f"`{name}`" in section, f"書式の引数の節に {name} の説明がない"

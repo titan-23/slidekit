@@ -358,8 +358,15 @@ def _attach_drawings(
     最初の字形の 1〜2 つ前に描き、後には描かない）。入れ子の構造では外側の線がさらに前に描かれる（`\\left(\\frac{\\sqrt{x}}{y}\\right)`
     の括弧は 3 つ前）ので、2 つ前より前も、その要素の線の条件に合う描画が続く間は、前の要素の最後の字形の後までさかのぼって
     候補にする。不透明度が 0 の描画（説明のある要素に PowerPoint が加える見えない矩形など）は除く。
+    要素の枠（area と、吹き出しの actual_area）と 1.0 pt 以内で一致する描画は、図形の枠として除く。
     """
     frames = [area for area in map(_area, elements) if area is not None]
+    # 吹き出しの輪郭の外接矩形は、しっぽまでの範囲（actual_area）になる。
+    frames += [
+        area
+        for element in elements
+        if element.get("kind") == "box" and (area := _area({"area": element.get("actual_area")})) is not None
+    ]
     painted = [area for area in map(_painted_range, elements) if area is not None]
     colors = {index: _colors(elements[index], contents[index]) for _, _, index in ranges}
     # 描画ごとの（seqno、外接矩形、線幅で広げる幅）。数式の線になりえないもの（図形の枠、塗った範囲の中、色のない描画）は

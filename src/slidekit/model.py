@@ -36,6 +36,17 @@ from .errors import ArgumentNameError, InputError
 from .fragments import Emphasis, Math, Text, content_fragments, valid_link
 from .layout import Rect, anchor_options, as_rect, finite_number
 from .measure import layout_element, layout_text, normalize_padding, phrase_wrapped_content
+from .outline import (
+    TAIL_AT,
+    TAIL_LENGTH_PT,
+    TAIL_SHAPES,
+    TAIL_SIDES,
+    TAIL_WIDTH_PT,
+    TailPointError,
+    TailWidthError,
+    tail_from_point,
+    tail_outline,
+)
 from .schema import PAGE_KINDS, role_usage_problems
 
 _KINDS = frozenset({"text", "box", "equation", "image", "line", "arrow", "group"})
@@ -45,7 +56,7 @@ _SIZED_KINDS = _MEASURED_KINDS | {"image"}
 # 種類ごとの専用の引数と、すべての要素に共通の引数。受け付けない名前の候補にも使う。
 _SPECIFIC = {
     "text": ("text",),
-    "box": ("text", "shape"),
+    "box": ("text", "shape", "tail_toward"),
     "equation": ("expression",),
     "image": ("path", "fit", "page", "raster_scale", "vector"),
     "line": ("start", "end"),
@@ -55,7 +66,22 @@ _SPECIFIC = {
 _COMMON = ("id", "role", "sources", "style")
 _TRANSFORMS = ("rotation", "flip_h", "flip_v")
 # 場面の書式で float にそろえる数値の項目（padding_pt は normalize_padding が扱う）。
-_NUMBER_KEYS = ("size_pt", "min_size_pt", "line_spacing", "line_width_pt", "line_spacing_pt", "corner_radius_pt")
+_NUMBER_KEYS = (
+    "size_pt",
+    "min_size_pt",
+    "line_spacing",
+    "line_width_pt",
+    "line_spacing_pt",
+    "corner_radius_pt",
+    "tail_at",
+    "tail_width_pt",
+    "tail_length_pt",
+)
+# しっぽの寸法と位置（tail_side がないときは使わない項目）。
+_TAIL_DIMENSIONS = ("tail_at", "tail_width_pt", "tail_length_pt")
+# 吹き出しと間違えやすい図形の名前（未対応の図形の文言に、tail_side の案内を添える）。
+_CALLOUT_NAMES = frozenset({"callout", "speech_bubble", "wedgeRectCallout"})
+_SIDE_LABELS = {"left": "左", "right": "右", "top": "上", "bottom": "下"}
 _HEX = re.compile("[0-9a-fA-F]{6}")
 _RASTER_FORMATS = (".png", ".jpg", ".jpeg")
 _IMAGE_FORMATS = (*_RASTER_FORMATS, ".svg", ".pdf")
@@ -71,6 +97,14 @@ def _shown(value) -> str:
     """誤りの文言に入れる値（repr を 40 文字まで）。"""
     text = repr(value)
     return text if len(text) <= 40 else text[:39] + "…"
+
+
+def _shape_problem(shape) -> str:
+    """未対応の図形の文言（場所を除く）。吹き出しと間違えやすい名前には tail_side の案内を添える。"""
+    message = f"未対応の図形です: {_shown(shape)}（候補: {'、'.join(styles.SHAPES)}）"
+    if isinstance(shape, str) and shape in _CALLOUT_NAMES:
+        message += "。吹き出しは tail_side で指定します"
+    return message
 
 
 def _option_number(value) -> float | None:
@@ -325,6 +359,10 @@ class Element:
             for child in self.slide.elements:
                 if child.data.get("parent_id") == self.id:
                     child.area = child.area.translated(dx, dy)
+                    # しっぽを向ける座標も、まとまりと一緒に動かす（anchor() の点は相手の要素に追従する）。
+                    point = getattr(child, "_tail_toward", None)
+                    if point is not None and not isinstance(point, Anchor):
+                        child._tail_toward = (point[0] + dx, point[1] + dy)
                     # まとまりの中で積み上げた子の領域も、まとまりと一緒に動かす。
                     if child.data.get("layout_bounds") is not None:
                         child.data["layout_bounds"] = list(as_rect(child.data["layout_bounds"]).translated(dx, dy))
@@ -430,6 +468,13 @@ class Group(Element):
                     and all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in point)
                 ):
                     arguments[key] = (point[0] + self.area.x, point[1] + self.area.y)
+            point = arguments.get("tail_toward")
+            if (
+                isinstance(point, (list, tuple))
+                and len(point) == 2
+                and all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in point)
+            ):
+                arguments["tail_toward"] = (point[0] + self.area.x, point[1] + self.area.y)
             return getattr(self.slide, name)(id=id, **arguments)
 
         return add
@@ -849,6 +894,8 @@ class Slide:
         self._allowed_warnings = []
         # stack.take で受け取った領域のうち、積み上げる領域を超えたもの（(stack, 受け取った領域)。座標は stack の座標）。
         self._taken_overflows = []
+        # 場面を作るときに報告した、しっぽの形の誤りの文言（作り直しても重ねて集めない）。
+        self._tail_reported = set()
         theme, (w, h) = self.project.theme, _page_size(self.project)
         self.kind_settings = copy.deepcopy(theme["page_kinds"][kind])
         if "content_area_pt" in self.kind_settings:
@@ -1095,13 +1142,25 @@ class Slide:
         return resolved.lstrip("#").upper()
 
     def _style(
-        self, kind, role, layers=(), *, content=(), element_id=None, declared=(), default_role=None, role_layer=True
+        self,
+        kind,
+        role,
+        layers=(),
+        *,
+        content=(),
+        element_id=None,
+        declared=(),
+        default_role=None,
+        role_layer=True,
+        keep_tail=False,
     ):
         """書式を解決し、(役割の名前, 書式) を返す。
 
         kind は書式の種類（`styles.STYLE_KEYS` の名前。None はテーマの背景）。layers は要素の層の列 (値の辞書, 確かめるか) で、
         後ろほど優先する。確かめる層では、値の誤りを `_clean` で扱う。padding_pt の一部の辺は下の層の値を引き継ぐ。
         role_layer が偽なら役割の書式を重ねない（ページ種別の飾りは種類の既定に飾りの指定を重ねる）。
+        しっぽの項目（`styles.TAIL_KEYS`）は、keep_tail が真のとき（しっぽを付けることができる box）だけ残す。
+        `[defaults]` と役割の項目がほかの要素に届いても、場面の書式に入れないためである。
         """
         role = self._resolve_role(role, content=content, element_id=element_id, declared=declared, default=default_role)
         definition = self.project.theme["roles"][role]
@@ -1133,6 +1192,9 @@ class Slide:
             problem = styles.check_style_value(name, value)
             if problem:
                 raise self._value_error(name, problem, value, element_id)
+        if not keep_tail:
+            for name in styles.TAIL_KEYS:
+                resolved.pop(name, None)
         for name in _NUMBER_KEYS:
             if resolved.get(name) is not None:
                 resolved[name] = float(resolved[name])
@@ -1433,13 +1495,16 @@ class Slide:
         _shape=None,
         _intrinsic=None,
         _source=None,
+        _tail_toward=None,
         **arguments,
     ):
         """要素を作る共通の処理。arguments は属性と書式のキーワード引数である。
 
         _parent_id・_element_id はまとまりの子の親と識別子、_style_kind は書式の種類（既定は kind。表のセルは
-        table_cell・table_header）、_shape は box の図形、_intrinsic・_source は画像の縦横比に使う寸法と素材のパスである。
+        table_cell・table_header）、_shape は box の図形、_intrinsic・_source は画像の縦横比に使う寸法と素材のパス、
+        _tail_toward は box のしっぽを向ける点（`tail_toward`）である。
         領域の幅・高さの None は書式を解決した後に `_resolve_area` で数値にする。
+        しっぽは、書式を解決した後に有無と回転・反転の可否を、領域を決めた後に付け根の幅が辺に収まるかを確かめる。
         """
         if kind not in _KINDS:
             raise InputError(
@@ -1518,14 +1583,29 @@ class Slide:
             )
             style.pop("corner_radius_pt", None)
             arguments.pop("corner_radius_pt", None)
+        # しっぽを付けることができるのは rectangle・rounded_rectangle の box だけ（表のセルは style_kind が違う）。
+        tail_ready = style_kind == "box" and _shape in TAIL_SHAPES
+        if style_kind == "box" and not tail_ready:
+            self._drop_tail_items(style, arguments, _shape, element_id, toward=_tail_toward)
+        toward = self._tail_target(_tail_toward, element_id) if tail_ready else None
+        specified = self._specified_tail(style, arguments) if tail_ready else {}
         try:
             raw = content_fragments(content)
         except InputError as error:
             raise self._locate(error, element_id) from None
         declared = self._declared(attributes.get("allow_roles", ()), parent)
         role, resolved = self._style(
-            style_kind, role, [(style, True), (arguments, True)], content=raw, element_id=element_id, declared=declared
+            style_kind,
+            role,
+            [(style, True), (arguments, True)],
+            content=raw,
+            element_id=element_id,
+            declared=declared,
+            keep_tail=tail_ready,
         )
+        fixed_side = None
+        if tail_ready:
+            toward, fixed_side = self._tail_settings(resolved, specified, toward, attributes, element_id)
         fragments = self._fragments(raw, resolved, element_id)
         if any(attributes.get(name) for name in _TRANSFORMS) and any(
             fragment["kind"] == "math" for fragment in fragments
@@ -1546,6 +1626,15 @@ class Slide:
             intrinsic=_intrinsic,
             source=_source,
         )
+        if tail_ready and (toward is not None or resolved.get("tail_side") in TAIL_SIDES):
+            # 呼び出しの位置で報告するため、作る時点の領域で付け根の幅を確かめる（場面を作るときにも確かめ直す）。
+            try:
+                self._tail_geometry(area, _shape, resolved, toward, fixed_side)
+            except (TailWidthError, TailPointError) as error:
+                self._problem(self._tail_error(error, element_id))
+                for name in styles.TAIL_KEYS:
+                    resolved.pop(name, None)
+                toward = fixed_side = None
         data = {
             "id": element_id,
             "kind": kind,
@@ -1566,25 +1655,257 @@ class Slide:
         element = (Group if kind == "group" else Element)(self, data)
         if kind == "image":
             element._intrinsic = None if _intrinsic is None else tuple(_intrinsic)
+        if tail_ready:
+            element._tail_toward, element._tail_side = toward, fixed_side
         self.elements.append(element)
         return element
+
+    # ---- 吹き出しのしっぽ ----
+
+    def _drop_tail_items(self, style, arguments, shape, element_id, *, toward=None):
+        """ellipse・diamond の box に指定したしっぽの項目を報告して除く（続行）。tail_toward は例外にする。"""
+        context = self._context(element_id)
+        if toward is not None:
+            raise InputError(
+                f"{context}: tail_toward は shape が rectangle か rounded_rectangle の box だけに指定できます（shape: {shape}）",
+                code="unsupported_argument",
+                slide_id=self.id,
+                element_id=element_id,
+                names=["tail_toward"],
+            )
+        for name in sorted(styles.TAIL_KEYS):
+            if any(values.get(name) is not None for values in (style, arguments)):
+                self._problem(
+                    InputError(
+                        f"{context}: {name} は shape が rectangle か rounded_rectangle の box だけに指定できます"
+                        f"（shape: {shape}）",
+                        code="invalid_style",
+                        slide_id=self.id,
+                        element_id=element_id,
+                        setting=name,
+                    )
+                )
+            style.pop(name, None)
+            arguments.pop(name, None)
+
+    @staticmethod
+    def _specified_tail(style, arguments) -> dict:
+        """style= とキーワード引数で指定した、値の正しいしっぽの項目（後ろほど優先）。"""
+        result = {}
+        for values in (style, arguments):
+            for name in styles.TAIL_KEYS:
+                value = values.get(name)
+                if value is not None and styles.check_style_value(name, value) is None:
+                    result[name] = value
+        return result
+
+    def _tail_target(self, value, element_id):
+        """tail_toward を確かめる。同じページの別の要素の `Anchor` か、ページ上の座標 (x, y)（pt）を返す。"""
+        if value is None:
+            return None
+        context = self._context(element_id)
+        if isinstance(value, Anchor):
+            if value.element.slide is not self:
+                raise InputError(
+                    f"{context}: 別のページの要素はしっぽで指すことができません: {value.element.id}",
+                    code="input_error",
+                    slide_id=self.id,
+                    element_id=element_id,
+                )
+            if value.element.id == element_id:
+                raise InputError(
+                    f"{context}: tail_toward に自分自身は指定できません",
+                    code="input_error",
+                    slide_id=self.id,
+                    element_id=element_id,
+                )
+            return value
+        if isinstance(value, (list, tuple)) and len(value) == 2:
+            try:
+                return (finite_number(value[0], "tail_toward の x"), finite_number(value[1], "tail_toward の y"))
+            except ValueError:
+                pass
+        raise InputError(
+            f"{context}: tail_toward は要素の anchor() か (x, y) で指定してください: {_shown(value)}",
+            code="input_error",
+            slide_id=self.id,
+            element_id=element_id,
+        )
+
+    def _tail_settings(self, resolved, specified, toward, attributes, element_id):
+        """解決後の書式からしっぽの有無を決め、(指す先, 固定した辺) を返す。
+
+        しっぽが付かなければ書式からしっぽの項目を取り除き、tail_side なしで要素が指定した寸法と位置を報告する（続行）。
+        しっぽが付く box の回転・反転は例外にする。固定した辺は、tail_toward と一緒に style= かキーワード引数で指定した辺である
+        （役割の tail_side は tail_toward が上書きする）。
+        """
+        context = self._context(element_id)
+        fixed = specified.get("tail_side")
+        if toward is not None:
+            if fixed == "none":
+                self._problem(
+                    InputError(
+                        f"{context}: tail_side に none を指定したときは tail_toward を使えません",
+                        code="invalid_style",
+                        slide_id=self.id,
+                        element_id=element_id,
+                        setting="tail_side",
+                    )
+                )
+                toward = None
+            else:
+                if "tail_at" in specified:
+                    self._problem(
+                        InputError(
+                            f"{context}: tail_toward を指定したときは tail_at を使えません（付け根の位置は指す点から決めます）",
+                            code="invalid_style",
+                            slide_id=self.id,
+                            element_id=element_id,
+                            setting="tail_at",
+                        )
+                    )
+                resolved.pop("tail_at", None)
+        if toward is None and resolved.get("tail_side") not in TAIL_SIDES:
+            for name in _TAIL_DIMENSIONS:
+                if name in specified:
+                    self._problem(
+                        InputError(
+                            f"{context}: {name} はしっぽを付けるときだけ使えます。"
+                            "tail_side に left・right・top・bottom のどれかを指定してください",
+                            code="invalid_style",
+                            slide_id=self.id,
+                            element_id=element_id,
+                            setting=name,
+                        )
+                    )
+            for name in styles.TAIL_KEYS:
+                resolved.pop(name, None)
+            return None, None
+        transformed = [name for name in _TRANSFORMS if attributes.get(name)]
+        if transformed:
+            raise InputError(
+                f"{context}: しっぽのある box は回転・反転できません（{'、'.join(transformed)}）。"
+                "しっぽの向きは tail_side で指定してください",
+                code="unsupported_argument",
+                slide_id=self.id,
+                element_id=element_id,
+                names=transformed,
+            )
+        return toward, (fixed if toward is not None and fixed in TAIL_SIDES else None)
+
+    @staticmethod
+    def _tail_geometry(area, shape, style, toward, fixed_side):
+        """しっぽの (辺, `outline.Outline`)。付け根が収まらなければ TailWidthError、指す点の誤りは TailPointError。"""
+
+        def value(name, default):
+            found = style.get(name)
+            return default if found is None else found
+
+        radius = style.get("corner_radius_pt")
+        width, length = value("tail_width_pt", TAIL_WIDTH_PT), value("tail_length_pt", TAIL_LENGTH_PT)
+        if toward is not None:
+            point = toward.point() if isinstance(toward, Anchor) else toward
+            side, at = tail_from_point(area, shape, point, side=fixed_side, corner_radius_pt=radius, width_pt=width)
+        else:
+            side, at = style["tail_side"], value("tail_at", TAIL_AT)
+        outline = tail_outline(area, shape, side=side, at=at, width_pt=width, length_pt=length, corner_radius_pt=radius)
+        return side, outline
+
+    def _tail_error(self, error, element_id) -> InputError:
+        """しっぽの形を決めることができない誤り（付け根の幅は invalid_style、指す点は invalid_geometry）。"""
+        context = self._context(element_id)
+
+        def pt(value) -> str:
+            return f"{round(value, 2):g}"
+
+        if isinstance(error, TailWidthError):
+            return InputError(
+                f"{context}: しっぽの付け根の幅 tail_width_pt（{pt(error.width)} pt）が{_SIDE_LABELS[error.side]}の辺の"
+                f"直線部分に収まりません（辺の長さ {pt(error.side_length)} pt、角丸の半径 {pt(error.radius)} pt、"
+                f"指定できる最大の幅 {pt(error.max_width)} pt）",
+                code="invalid_style",
+                slide_id=self.id,
+                element_id=element_id,
+                setting="tail_width_pt",
+                side=error.side,
+                width_pt=round(error.width, 2),
+                side_length_pt=round(error.side_length, 2),
+                radius_pt=round(error.radius, 2),
+                max_width_pt=round(error.max_width, 2),
+            )
+        x, y = error.point
+        where = (
+            "本体の内側にあります"
+            if error.side is None
+            else f" tail_side で指定した{_SIDE_LABELS[error.side]}の辺の外側にありません"
+        )
+        return InputError(
+            f"{context}: tail_toward の点 ({pt(x)}, {pt(y)}) が{where}。しっぽを向ける点は本体の外に置いてください",
+            code="invalid_geometry",
+            slide_id=self.id,
+            element_id=element_id,
+            point=[round(x, 2), round(y, 2)],
+            side=error.side,
+        )
+
+    def _scene_tail(self, element, data) -> None:
+        """場面の要素 data に、しっぽの tail・actual_area・outside_parts を入れる。しっぽのない要素は変えない。
+
+        形は最後の領域で決める。付け根が収まらないなどで形を決めることができなければ、報告して（続行）しっぽを付けない。
+        """
+        toward = getattr(element, "_tail_toward", None)
+        style = data.get("style") or {}
+        if toward is None and style.get("tail_side") not in TAIL_SIDES:
+            return
+        try:
+            side, outline = self._tail_geometry(
+                element.area, data.get("shape", "rectangle"), style, toward, getattr(element, "_tail_side", None)
+            )
+        except (TailWidthError, TailPointError) as error:
+            problem = self._tail_error(error, element.id)
+            # 場面は資料の生成で 1 回だけ作るが、作り直しても同じ誤りを重ねて集めない。
+            if str(problem) not in self._tail_reported:
+                self._tail_reported.add(str(problem))
+                self._problem(problem)
+            for name in styles.TAIL_KEYS:
+                style.pop(name, None)
+            return
+        tail = {
+            "side": side,
+            "at": outline.at,
+            "width_pt": float(style.get("tail_width_pt") or TAIL_WIDTH_PT),
+            "length_pt": float(style.get("tail_length_pt") or TAIL_LENGTH_PT),
+            "points": [list(point) for point in outline.tail],
+        }
+        if toward is not None:
+            tail["target"] = toward.reference() if isinstance(toward, Anchor) else {"point": list(toward)}
+        data["actual_area"] = list(outline.actual_area)
+        data["outside_parts"] = [{"part": name, "area": list(area)} for name, area in outline.outside]
+        data["tail"] = tail
 
     # ---- 要素を作る関数 ----
 
     def text(self, *, id, text, area, role=None, **arguments):
         return self._add("text", id=id, area=area, role=role, content=text, **arguments)
 
-    def box(self, *, id, area, text="", shape="rectangle", role=None, **arguments):
+    def box(self, *, id, area, text="", shape="rectangle", role=None, tail_toward=None, **arguments):
+        """図形を置く。書式の tail_side（rectangle・rounded_rectangle だけ）で本体の辺にしっぽを付けると吹き出しになる。
+
+        tail_toward は、しっぽを向ける点（同じページの別の要素の anchor() か、ページ上の座標 (x, y)）。渡すと、しっぽの辺と
+        付け根の位置をその点から決める（長さは tail_length_pt のまま）。
+        """
         shape = "rectangle" if shape is None else shape
-        if shape not in styles.SHAPES:
+        if not isinstance(shape, str) or shape not in styles.SHAPES:
             element_id = arguments.get("_element_id") or id
             raise InputError(
-                f"{self._context(element_id)}: 未対応の図形です: {_shown(shape)}（候補: {'、'.join(styles.SHAPES)}）",
+                f"{self._context(element_id)}: {_shape_problem(shape)}",
                 code="input_error",
                 slide_id=self.id,
                 element_id=element_id,
             )
-        return self._add("box", id=id, area=area, role=role, content=text, _shape=shape, **arguments)
+        return self._add(
+            "box", id=id, area=area, role=role, content=text, _shape=shape, _tail_toward=tail_toward, **arguments
+        )
 
     def equation(self, *, id, area, expression=None, role=None, **arguments):
         element_id = arguments.get("_element_id") or id
@@ -1922,12 +2243,8 @@ class Slide:
                 )
             width = number
         shape = "rectangle" if shape is None else shape
-        if kind == "box" and shape not in styles.SHAPES:
-            raise InputError(
-                f"{context}: 未対応の図形です: {_shown(shape)}（候補: {'、'.join(styles.SHAPES)}）",
-                code="input_error",
-                slide_id=self.id,
-            )
+        if kind == "box" and (not isinstance(shape, str) or shape not in styles.SHAPES):
+            raise InputError(f"{context}: {_shape_problem(shape)}", code="input_error", slide_id=self.id)
         if kind != "box" and shape != "rectangle":
             raise InputError(
                 f"{context}: shape は kind が box のときだけ指定できます: {_shown(shape)}",
@@ -1967,6 +2284,8 @@ class Slide:
             )
             style.pop("corner_radius_pt", None)
             arguments.pop("corner_radius_pt", None)
+        if kind == "box" and shape not in TAIL_SHAPES:
+            self._drop_tail_items(style, arguments, shape, None)
         try:
             raw = content_fragments(text)
         except InputError as error:
@@ -2304,6 +2623,9 @@ class Slide:
             if data["kind"] == "image" and "image_size" in data:
                 # PNG・JPEG の表示範囲（PDF・SVG は素材の準備が変換後の画素数で決める）。
                 data["actual_area"] = list(element._visible_area())
+            if data["kind"] == "box":
+                # しっぽは移動後の領域で形を決める（しっぽのない box は変えない）。
+                self._scene_tail(element, data)
             style = data.get("style") or {}
             if data["kind"] in ("text", "box", "equation") and style.get("phrase_wrap") and style.get("word_wrap"):
                 # 文節の境で折り返した位置に明示改行を入れる（PowerPoint は和文の文字の間ならどこでも折り返すため）。

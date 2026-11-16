@@ -10439,6 +10439,1326 @@
     {
       "actual": {
         "baselines_pt": [
+          84.41,
+          106.49,
+          128.57
+        ],
+        "drawings": 0,
+        "fonts": {
+          ".": "ArialMT",
+          "T": "ArialMT",
+          "a": "ArialMT",
+          "e": "ArialMT",
+          "i": "ArialMT",
+          "l": "ArialMT",
+          "m": "ArialMT",
+          "r": "ArialMT",
+          "s": "ArialMT",
+          "t": "ArialMT",
+          "x": "ArialMT",
+          "、": "YuGothicUI-Regular",
+          "。": "YuGothicUI-Regular",
+          "が": "YuGothicUI-Regular",
+          "く": "YuGothicUI-Regular",
+          "け": "YuGothicUI-Regular",
+          "で": "YuGothicUI-Regular",
+          "な": "YuGothicUI-Regular",
+          "の": "YuGothicUI-Regular",
+          "は": "YuGothicUI-Regular",
+          "よ": "YuGothicUI-Regular",
+          "り": "YuGothicUI-Regular",
+          "る": "YuGothicUI-Regular",
+          "を": "YuGothicUI-Regular",
+          "中": "YuGothicUI-Regular",
+          "囲": "YuGothicUI-Regular",
+          "図": "YuGothicUI-Regular",
+          "字": "YuGothicUI-Regular",
+          "形": "YuGothicUI-Regular",
+          "文": "YuGothicUI-Regular",
+          "枠": "YuGothicUI-Regular",
+          "狭": "YuGothicUI-Regular",
+          "範": "YuGothicUI-Regular",
+          "置": "YuGothicUI-Regular"
+        },
+        "glyphs": 42,
+        "ink_pt": [
+          38.016,
+          71.162,
+          220.582,
+          128.757
+        ],
+        "line_extents_pt": [
+          [
+            38.016,
+            220.582
+          ],
+          [
+            38.016,
+            213.315
+          ],
+          [
+            38.016,
+            145.602
+          ]
+        ],
+        "lines": 3,
+        "sizes_pt": [
+          15.96
+        ]
+      },
+      "element": {
+        "actual_area": [
+          24.0,
+          30.0,
+          208.0,
+          140.0
+        ],
+        "area": [
+          32.0,
+          30.0,
+          200.0,
+          140.0
+        ],
+        "content": [
+          {
+            "kind": "text",
+            "text": "図形の中では、文字を置ける範囲が枠より狭くなる。Text area is smaller."
+          }
+        ],
+        "description": "tags: c3 callout",
+        "id": "rectangle_left",
+        "kind": "box",
+        "outside_parts": [
+          {
+            "area": [
+              24.0,
+              67.0,
+              8.0,
+              10.0
+            ],
+            "part": "tail"
+          }
+        ],
+        "role": "sample",
+        "shape": "rectangle",
+        "style": {
+          "align": "left",
+          "bold": false,
+          "color": "20252B",
+          "corner_radius_pt": 6.0,
+          "emphasis_color": "C43D3D",
+          "fill": "F3F6FA",
+          "font_japanese": "Yu Gothic UI",
+          "font_latin": "Arial",
+          "font_math": "Cambria Math",
+          "line_color": "183153",
+          "line_spacing": 1.15,
+          "line_width_pt": 1.0,
+          "min_size_pt": 8.0,
+          "padding_pt": 6.0,
+          "phrase_wrap": false,
+          "size_pt": 16.0,
+          "tail_at": 0.3,
+          "tail_side": "left",
+          "valign": "middle",
+          "word_wrap": true
+        },
+        "tail": {
+          "at": 0.3,
+          "length_pt": 8.0,
+          "points": [
+            [
+              32.0,
+              67.0
+            ],
+            [
+              24.0,
+              72.0
+            ],
+            [
+              32.0,
+              77.0
+            ]
+          ],
+          "side": "left",
+          "width_pt": 10.0
+        }
+      },
+      "element_id": "rectangle_left",
+      "slide_id": "callouts",
+      "tags": [
+        "callouts",
+        "c3",
+        "callout",
+        "kind:box",
+        "shape:rectangle",
+        "wrap",
+        "align:left",
+        "valign:middle",
+        "size:16",
+        "spacing:1.15",
+        "latin:Arial",
+        "japanese:Yu_Gothic_UI"
+      ]
+    },
+    {
+      "actual": {
+        "baselines_pt": [
+          84.41,
+          106.49,
+          128.57
+        ],
+        "drawings": 0,
+        "fonts": {
+          ".": "ArialMT",
+          "T": "ArialMT",
+          "a": "ArialMT",
+          "e": "ArialMT",
+          "i": "ArialMT",
+          "l": "ArialMT",
+          "m": "ArialMT",
+          "r": "ArialMT",
+          "s": "ArialMT",
+          "t": "ArialMT",
+          "x": "ArialMT",
+          "、": "YuGothicUI-Regular",
+          "。": "YuGothicUI-Regular",
+          "が": "YuGothicUI-Regular",
+          "く": "YuGothicUI-Regular",
+          "け": "YuGothicUI-Regular",
+          "で": "YuGothicUI-Regular",
+          "な": "YuGothicUI-Regular",
+          "の": "YuGothicUI-Regular",
+          "は": "YuGothicUI-Regular",
+          "よ": "YuGothicUI-Regular",
+          "り": "YuGothicUI-Regular",
+          "る": "YuGothicUI-Regular",
+          "を": "YuGothicUI-Regular",
+          "中": "YuGothicUI-Regular",
+          "囲": "YuGothicUI-Regular",
+          "図": "YuGothicUI-Regular",
+          "字": "YuGothicUI-Regular",
+          "形": "YuGothicUI-Regular",
+          "文": "YuGothicUI-Regular",
+          "枠": "YuGothicUI-Regular",
+          "狭": "YuGothicUI-Regular",
+          "範": "YuGothicUI-Regular",
+          "置": "YuGothicUI-Regular"
+        },
+        "glyphs": 42,
+        "ink_pt": [
+          266.04,
+          71.162,
+          448.606,
+          128.757
+        ],
+        "line_extents_pt": [
+          [
+            266.04,
+            448.606
+          ],
+          [
+            266.04,
+            441.446
+          ],
+          [
+            266.04,
+            373.626
+          ]
+        ],
+        "lines": 3,
+        "sizes_pt": [
+          15.96
+        ]
+      },
+      "element": {
+        "actual_area": [
+          260.0,
+          30.0,
+          208.0,
+          140.0
+        ],
+        "area": [
+          260.0,
+          30.0,
+          200.0,
+          140.0
+        ],
+        "content": [
+          {
+            "kind": "text",
+            "text": "図形の中では、文字を置ける範囲が枠より狭くなる。Text area is smaller."
+          }
+        ],
+        "description": "tags: c3 callout",
+        "id": "rectangle_right",
+        "kind": "box",
+        "outside_parts": [
+          {
+            "area": [
+              460.0,
+              67.0,
+              8.0,
+              10.0
+            ],
+            "part": "tail"
+          }
+        ],
+        "role": "sample",
+        "shape": "rectangle",
+        "style": {
+          "align": "left",
+          "bold": false,
+          "color": "20252B",
+          "corner_radius_pt": 6.0,
+          "emphasis_color": "C43D3D",
+          "fill": "F3F6FA",
+          "font_japanese": "Yu Gothic UI",
+          "font_latin": "Arial",
+          "font_math": "Cambria Math",
+          "line_color": "183153",
+          "line_spacing": 1.15,
+          "line_width_pt": 1.0,
+          "min_size_pt": 8.0,
+          "padding_pt": 6.0,
+          "phrase_wrap": false,
+          "size_pt": 16.0,
+          "tail_at": 0.3,
+          "tail_side": "right",
+          "valign": "middle",
+          "word_wrap": true
+        },
+        "tail": {
+          "at": 0.3,
+          "length_pt": 8.0,
+          "points": [
+            [
+              460.0,
+              67.0
+            ],
+            [
+              468.0,
+              72.0
+            ],
+            [
+              460.0,
+              77.0
+            ]
+          ],
+          "side": "right",
+          "width_pt": 10.0
+        }
+      },
+      "element_id": "rectangle_right",
+      "slide_id": "callouts",
+      "tags": [
+        "callouts",
+        "c3",
+        "callout",
+        "kind:box",
+        "shape:rectangle",
+        "wrap",
+        "align:left",
+        "valign:middle",
+        "size:16",
+        "spacing:1.15",
+        "latin:Arial",
+        "japanese:Yu_Gothic_UI"
+      ]
+    },
+    {
+      "actual": {
+        "baselines_pt": [
+          84.41,
+          106.49,
+          128.57
+        ],
+        "drawings": 0,
+        "fonts": {
+          ".": "ArialMT",
+          "T": "ArialMT",
+          "a": "ArialMT",
+          "e": "ArialMT",
+          "i": "ArialMT",
+          "l": "ArialMT",
+          "m": "ArialMT",
+          "r": "ArialMT",
+          "s": "ArialMT",
+          "t": "ArialMT",
+          "x": "ArialMT",
+          "、": "YuGothicUI-Regular",
+          "。": "YuGothicUI-Regular",
+          "が": "YuGothicUI-Regular",
+          "く": "YuGothicUI-Regular",
+          "け": "YuGothicUI-Regular",
+          "で": "YuGothicUI-Regular",
+          "な": "YuGothicUI-Regular",
+          "の": "YuGothicUI-Regular",
+          "は": "YuGothicUI-Regular",
+          "よ": "YuGothicUI-Regular",
+          "り": "YuGothicUI-Regular",
+          "る": "YuGothicUI-Regular",
+          "を": "YuGothicUI-Regular",
+          "中": "YuGothicUI-Regular",
+          "囲": "YuGothicUI-Regular",
+          "図": "YuGothicUI-Regular",
+          "字": "YuGothicUI-Regular",
+          "形": "YuGothicUI-Regular",
+          "文": "YuGothicUI-Regular",
+          "枠": "YuGothicUI-Regular",
+          "狭": "YuGothicUI-Regular",
+          "範": "YuGothicUI-Regular",
+          "置": "YuGothicUI-Regular"
+        },
+        "glyphs": 42,
+        "ink_pt": [
+          494.06,
+          71.162,
+          676.626,
+          128.757
+        ],
+        "line_extents_pt": [
+          [
+            494.06,
+            676.626
+          ],
+          [
+            494.06,
+            669.385
+          ],
+          [
+            494.06,
+            601.646
+          ]
+        ],
+        "lines": 3,
+        "sizes_pt": [
+          15.96
+        ]
+      },
+      "element": {
+        "actual_area": [
+          488.0,
+          22.0,
+          200.0,
+          148.0
+        ],
+        "area": [
+          488.0,
+          30.0,
+          200.0,
+          140.0
+        ],
+        "content": [
+          {
+            "kind": "text",
+            "text": "図形の中では、文字を置ける範囲が枠より狭くなる。Text area is smaller."
+          }
+        ],
+        "description": "tags: c3 callout",
+        "id": "rectangle_top",
+        "kind": "box",
+        "outside_parts": [
+          {
+            "area": [
+              543.0,
+              22.0,
+              10.0,
+              8.0
+            ],
+            "part": "tail"
+          }
+        ],
+        "role": "sample",
+        "shape": "rectangle",
+        "style": {
+          "align": "left",
+          "bold": false,
+          "color": "20252B",
+          "corner_radius_pt": 6.0,
+          "emphasis_color": "C43D3D",
+          "fill": "F3F6FA",
+          "font_japanese": "Yu Gothic UI",
+          "font_latin": "Arial",
+          "font_math": "Cambria Math",
+          "line_color": "183153",
+          "line_spacing": 1.15,
+          "line_width_pt": 1.0,
+          "min_size_pt": 8.0,
+          "padding_pt": 6.0,
+          "phrase_wrap": false,
+          "size_pt": 16.0,
+          "tail_at": 0.3,
+          "tail_side": "top",
+          "valign": "middle",
+          "word_wrap": true
+        },
+        "tail": {
+          "at": 0.3,
+          "length_pt": 8.0,
+          "points": [
+            [
+              543.0,
+              30.0
+            ],
+            [
+              548.0,
+              22.0
+            ],
+            [
+              553.0,
+              30.0
+            ]
+          ],
+          "side": "top",
+          "width_pt": 10.0
+        }
+      },
+      "element_id": "rectangle_top",
+      "slide_id": "callouts",
+      "tags": [
+        "callouts",
+        "c3",
+        "callout",
+        "kind:box",
+        "shape:rectangle",
+        "wrap",
+        "align:left",
+        "valign:middle",
+        "size:16",
+        "spacing:1.15",
+        "latin:Arial",
+        "japanese:Yu_Gothic_UI"
+      ]
+    },
+    {
+      "actual": {
+        "baselines_pt": [
+          84.41,
+          106.49,
+          128.57
+        ],
+        "drawings": 0,
+        "fonts": {
+          ".": "ArialMT",
+          "T": "ArialMT",
+          "a": "ArialMT",
+          "e": "ArialMT",
+          "i": "ArialMT",
+          "l": "ArialMT",
+          "m": "ArialMT",
+          "r": "ArialMT",
+          "s": "ArialMT",
+          "t": "ArialMT",
+          "x": "ArialMT",
+          "、": "YuGothicUI-Regular",
+          "。": "YuGothicUI-Regular",
+          "が": "YuGothicUI-Regular",
+          "く": "YuGothicUI-Regular",
+          "け": "YuGothicUI-Regular",
+          "で": "YuGothicUI-Regular",
+          "な": "YuGothicUI-Regular",
+          "の": "YuGothicUI-Regular",
+          "は": "YuGothicUI-Regular",
+          "よ": "YuGothicUI-Regular",
+          "り": "YuGothicUI-Regular",
+          "る": "YuGothicUI-Regular",
+          "を": "YuGothicUI-Regular",
+          "中": "YuGothicUI-Regular",
+          "囲": "YuGothicUI-Regular",
+          "図": "YuGothicUI-Regular",
+          "字": "YuGothicUI-Regular",
+          "形": "YuGothicUI-Regular",
+          "文": "YuGothicUI-Regular",
+          "枠": "YuGothicUI-Regular",
+          "狭": "YuGothicUI-Regular",
+          "範": "YuGothicUI-Regular",
+          "置": "YuGothicUI-Regular"
+        },
+        "glyphs": 42,
+        "ink_pt": [
+          722.09,
+          71.162,
+          904.656,
+          128.757
+        ],
+        "line_extents_pt": [
+          [
+            722.09,
+            904.656
+          ],
+          [
+            722.09,
+            897.405
+          ],
+          [
+            722.09,
+            829.676
+          ]
+        ],
+        "lines": 3,
+        "sizes_pt": [
+          15.96
+        ]
+      },
+      "element": {
+        "actual_area": [
+          716.0,
+          30.0,
+          200.0,
+          148.0
+        ],
+        "area": [
+          716.0,
+          30.0,
+          200.0,
+          140.0
+        ],
+        "content": [
+          {
+            "kind": "text",
+            "text": "図形の中では、文字を置ける範囲が枠より狭くなる。Text area is smaller."
+          }
+        ],
+        "description": "tags: c3 callout",
+        "id": "rectangle_bottom",
+        "kind": "box",
+        "outside_parts": [
+          {
+            "area": [
+              771.0,
+              170.0,
+              10.0,
+              8.0
+            ],
+            "part": "tail"
+          }
+        ],
+        "role": "sample",
+        "shape": "rectangle",
+        "style": {
+          "align": "left",
+          "bold": false,
+          "color": "20252B",
+          "corner_radius_pt": 6.0,
+          "emphasis_color": "C43D3D",
+          "fill": "F3F6FA",
+          "font_japanese": "Yu Gothic UI",
+          "font_latin": "Arial",
+          "font_math": "Cambria Math",
+          "line_color": "183153",
+          "line_spacing": 1.15,
+          "line_width_pt": 1.0,
+          "min_size_pt": 8.0,
+          "padding_pt": 6.0,
+          "phrase_wrap": false,
+          "size_pt": 16.0,
+          "tail_at": 0.3,
+          "tail_side": "bottom",
+          "valign": "middle",
+          "word_wrap": true
+        },
+        "tail": {
+          "at": 0.3,
+          "length_pt": 8.0,
+          "points": [
+            [
+              771.0,
+              170.0
+            ],
+            [
+              776.0,
+              178.0
+            ],
+            [
+              781.0,
+              170.0
+            ]
+          ],
+          "side": "bottom",
+          "width_pt": 10.0
+        }
+      },
+      "element_id": "rectangle_bottom",
+      "slide_id": "callouts",
+      "tags": [
+        "callouts",
+        "c3",
+        "callout",
+        "kind:box",
+        "shape:rectangle",
+        "wrap",
+        "align:left",
+        "valign:middle",
+        "size:16",
+        "spacing:1.15",
+        "latin:Arial",
+        "japanese:Yu_Gothic_UI"
+      ]
+    },
+    {
+      "actual": {
+        "baselines_pt": [
+          254.45,
+          276.53,
+          298.61
+        ],
+        "drawings": 0,
+        "fonts": {
+          ".": "ArialMT",
+          "T": "ArialMT",
+          "a": "ArialMT",
+          "e": "ArialMT",
+          "i": "ArialMT",
+          "l": "ArialMT",
+          "m": "ArialMT",
+          "r": "ArialMT",
+          "s": "ArialMT",
+          "t": "ArialMT",
+          "x": "ArialMT",
+          "、": "YuGothicUI-Regular",
+          "。": "YuGothicUI-Regular",
+          "が": "YuGothicUI-Regular",
+          "く": "YuGothicUI-Regular",
+          "け": "YuGothicUI-Regular",
+          "で": "YuGothicUI-Regular",
+          "な": "YuGothicUI-Regular",
+          "の": "YuGothicUI-Regular",
+          "は": "YuGothicUI-Regular",
+          "よ": "YuGothicUI-Regular",
+          "り": "YuGothicUI-Regular",
+          "る": "YuGothicUI-Regular",
+          "を": "YuGothicUI-Regular",
+          "中": "YuGothicUI-Regular",
+          "囲": "YuGothicUI-Regular",
+          "図": "YuGothicUI-Regular",
+          "字": "YuGothicUI-Regular",
+          "形": "YuGothicUI-Regular",
+          "文": "YuGothicUI-Regular",
+          "枠": "YuGothicUI-Regular",
+          "狭": "YuGothicUI-Regular",
+          "範": "YuGothicUI-Regular",
+          "置": "YuGothicUI-Regular"
+        },
+        "glyphs": 42,
+        "ink_pt": [
+          46.728,
+          241.202,
+          217.133,
+          298.797
+        ],
+        "line_extents_pt": [
+          [
+            46.728,
+            217.133
+          ],
+          [
+            52.848,
+            211.155
+          ],
+          [
+            61.128,
+            202.645
+          ]
+        ],
+        "lines": 3,
+        "sizes_pt": [
+          15.96
+        ]
+      },
+      "element": {
+        "actual_area": [
+          24.0,
+          200.0,
+          208.0,
+          140.0
+        ],
+        "area": [
+          32.0,
+          200.0,
+          200.0,
+          140.0
+        ],
+        "content": [
+          {
+            "kind": "text",
+            "text": "図形の中では、文字を置ける範囲が枠より狭くなる。Text area is smaller."
+          }
+        ],
+        "description": "tags: c3 callout",
+        "id": "rounded_rectangle_left",
+        "kind": "box",
+        "outside_parts": [
+          {
+            "area": [
+              24.0,
+              237.0,
+              8.0,
+              10.0
+            ],
+            "part": "tail"
+          }
+        ],
+        "role": "sample",
+        "shape": "rounded_rectangle",
+        "style": {
+          "align": "center",
+          "bold": false,
+          "color": "20252B",
+          "corner_radius_pt": 12.0,
+          "emphasis_color": "C43D3D",
+          "fill": "F3F6FA",
+          "font_japanese": "Yu Gothic UI",
+          "font_latin": "Arial",
+          "font_math": "Cambria Math",
+          "line_color": "183153",
+          "line_spacing": 1.15,
+          "line_width_pt": 1.0,
+          "min_size_pt": 8.0,
+          "padding_pt": 6.0,
+          "phrase_wrap": false,
+          "size_pt": 16.0,
+          "tail_at": 0.3,
+          "tail_side": "left",
+          "valign": "middle",
+          "word_wrap": true
+        },
+        "tail": {
+          "at": 0.3,
+          "length_pt": 8.0,
+          "points": [
+            [
+              32.0,
+              237.0
+            ],
+            [
+              24.0,
+              242.0
+            ],
+            [
+              32.0,
+              247.0
+            ]
+          ],
+          "side": "left",
+          "width_pt": 10.0
+        }
+      },
+      "element_id": "rounded_rectangle_left",
+      "slide_id": "callouts",
+      "tags": [
+        "callouts",
+        "c3",
+        "callout",
+        "kind:box",
+        "shape:rounded_rectangle",
+        "wrap",
+        "align:center",
+        "valign:middle",
+        "size:16",
+        "spacing:1.15",
+        "latin:Arial",
+        "japanese:Yu_Gothic_UI"
+      ]
+    },
+    {
+      "actual": {
+        "baselines_pt": [
+          254.45,
+          276.53,
+          298.61
+        ],
+        "drawings": 0,
+        "fonts": {
+          ".": "ArialMT",
+          "T": "ArialMT",
+          "a": "ArialMT",
+          "e": "ArialMT",
+          "i": "ArialMT",
+          "l": "ArialMT",
+          "m": "ArialMT",
+          "r": "ArialMT",
+          "s": "ArialMT",
+          "t": "ArialMT",
+          "x": "ArialMT",
+          "、": "YuGothicUI-Regular",
+          "。": "YuGothicUI-Regular",
+          "が": "YuGothicUI-Regular",
+          "く": "YuGothicUI-Regular",
+          "け": "YuGothicUI-Regular",
+          "で": "YuGothicUI-Regular",
+          "な": "YuGothicUI-Regular",
+          "の": "YuGothicUI-Regular",
+          "は": "YuGothicUI-Regular",
+          "よ": "YuGothicUI-Regular",
+          "り": "YuGothicUI-Regular",
+          "る": "YuGothicUI-Regular",
+          "を": "YuGothicUI-Regular",
+          "中": "YuGothicUI-Regular",
+          "囲": "YuGothicUI-Regular",
+          "図": "YuGothicUI-Regular",
+          "字": "YuGothicUI-Regular",
+          "形": "YuGothicUI-Regular",
+          "文": "YuGothicUI-Regular",
+          "枠": "YuGothicUI-Regular",
+          "狭": "YuGothicUI-Regular",
+          "範": "YuGothicUI-Regular",
+          "置": "YuGothicUI-Regular"
+        },
+        "glyphs": 42,
+        "ink_pt": [
+          274.75,
+          241.202,
+          445.155,
+          298.797
+        ],
+        "line_extents_pt": [
+          [
+            274.75,
+            445.155
+          ],
+          [
+            280.87,
+            439.177
+          ],
+          [
+            289.15,
+            430.667
+          ]
+        ],
+        "lines": 3,
+        "sizes_pt": [
+          15.96
+        ]
+      },
+      "element": {
+        "actual_area": [
+          260.0,
+          200.0,
+          208.0,
+          140.0
+        ],
+        "area": [
+          260.0,
+          200.0,
+          200.0,
+          140.0
+        ],
+        "content": [
+          {
+            "kind": "text",
+            "text": "図形の中では、文字を置ける範囲が枠より狭くなる。Text area is smaller."
+          }
+        ],
+        "description": "tags: c3 callout",
+        "id": "rounded_rectangle_right",
+        "kind": "box",
+        "outside_parts": [
+          {
+            "area": [
+              460.0,
+              237.0,
+              8.0,
+              10.0
+            ],
+            "part": "tail"
+          }
+        ],
+        "role": "sample",
+        "shape": "rounded_rectangle",
+        "style": {
+          "align": "center",
+          "bold": false,
+          "color": "20252B",
+          "corner_radius_pt": 12.0,
+          "emphasis_color": "C43D3D",
+          "fill": "F3F6FA",
+          "font_japanese": "Yu Gothic UI",
+          "font_latin": "Arial",
+          "font_math": "Cambria Math",
+          "line_color": "183153",
+          "line_spacing": 1.15,
+          "line_width_pt": 1.0,
+          "min_size_pt": 8.0,
+          "padding_pt": 6.0,
+          "phrase_wrap": false,
+          "size_pt": 16.0,
+          "tail_at": 0.3,
+          "tail_side": "right",
+          "valign": "middle",
+          "word_wrap": true
+        },
+        "tail": {
+          "at": 0.3,
+          "length_pt": 8.0,
+          "points": [
+            [
+              460.0,
+              237.0
+            ],
+            [
+              468.0,
+              242.0
+            ],
+            [
+              460.0,
+              247.0
+            ]
+          ],
+          "side": "right",
+          "width_pt": 10.0
+        }
+      },
+      "element_id": "rounded_rectangle_right",
+      "slide_id": "callouts",
+      "tags": [
+        "callouts",
+        "c3",
+        "callout",
+        "kind:box",
+        "shape:rounded_rectangle",
+        "wrap",
+        "align:center",
+        "valign:middle",
+        "size:16",
+        "spacing:1.15",
+        "latin:Arial",
+        "japanese:Yu_Gothic_UI"
+      ]
+    },
+    {
+      "actual": {
+        "baselines_pt": [
+          254.45,
+          276.53,
+          298.61
+        ],
+        "drawings": 0,
+        "fonts": {
+          ".": "ArialMT",
+          "T": "ArialMT",
+          "a": "ArialMT",
+          "e": "ArialMT",
+          "i": "ArialMT",
+          "l": "ArialMT",
+          "m": "ArialMT",
+          "r": "ArialMT",
+          "s": "ArialMT",
+          "t": "ArialMT",
+          "x": "ArialMT",
+          "、": "YuGothicUI-Regular",
+          "。": "YuGothicUI-Regular",
+          "が": "YuGothicUI-Regular",
+          "く": "YuGothicUI-Regular",
+          "け": "YuGothicUI-Regular",
+          "で": "YuGothicUI-Regular",
+          "な": "YuGothicUI-Regular",
+          "の": "YuGothicUI-Regular",
+          "は": "YuGothicUI-Regular",
+          "よ": "YuGothicUI-Regular",
+          "り": "YuGothicUI-Regular",
+          "る": "YuGothicUI-Regular",
+          "を": "YuGothicUI-Regular",
+          "中": "YuGothicUI-Regular",
+          "囲": "YuGothicUI-Regular",
+          "図": "YuGothicUI-Regular",
+          "字": "YuGothicUI-Regular",
+          "形": "YuGothicUI-Regular",
+          "文": "YuGothicUI-Regular",
+          "枠": "YuGothicUI-Regular",
+          "狭": "YuGothicUI-Regular",
+          "範": "YuGothicUI-Regular",
+          "置": "YuGothicUI-Regular"
+        },
+        "glyphs": 42,
+        "ink_pt": [
+          502.78,
+          241.202,
+          673.392,
+          298.797
+        ],
+        "line_extents_pt": [
+          [
+            502.78,
+            673.392
+          ],
+          [
+            508.9,
+            667.431
+          ],
+          [
+            517.2,
+            658.717
+          ]
+        ],
+        "lines": 3,
+        "sizes_pt": [
+          15.96
+        ]
+      },
+      "element": {
+        "actual_area": [
+          488.0,
+          192.0,
+          200.0,
+          148.0
+        ],
+        "area": [
+          488.0,
+          200.0,
+          200.0,
+          140.0
+        ],
+        "content": [
+          {
+            "kind": "text",
+            "text": "図形の中では、文字を置ける範囲が枠より狭くなる。Text area is smaller."
+          }
+        ],
+        "description": "tags: c3 callout",
+        "id": "rounded_rectangle_top",
+        "kind": "box",
+        "outside_parts": [
+          {
+            "area": [
+              543.0,
+              192.0,
+              10.0,
+              8.0
+            ],
+            "part": "tail"
+          }
+        ],
+        "role": "sample",
+        "shape": "rounded_rectangle",
+        "style": {
+          "align": "center",
+          "bold": false,
+          "color": "20252B",
+          "corner_radius_pt": 12.0,
+          "emphasis_color": "C43D3D",
+          "fill": "F3F6FA",
+          "font_japanese": "Yu Gothic UI",
+          "font_latin": "Arial",
+          "font_math": "Cambria Math",
+          "line_color": "183153",
+          "line_spacing": 1.15,
+          "line_width_pt": 1.0,
+          "min_size_pt": 8.0,
+          "padding_pt": 6.0,
+          "phrase_wrap": false,
+          "size_pt": 16.0,
+          "tail_at": 0.3,
+          "tail_side": "top",
+          "valign": "middle",
+          "word_wrap": true
+        },
+        "tail": {
+          "at": 0.3,
+          "length_pt": 8.0,
+          "points": [
+            [
+              543.0,
+              200.0
+            ],
+            [
+              548.0,
+              192.0
+            ],
+            [
+              553.0,
+              200.0
+            ]
+          ],
+          "side": "top",
+          "width_pt": 10.0
+        }
+      },
+      "element_id": "rounded_rectangle_top",
+      "slide_id": "callouts",
+      "tags": [
+        "callouts",
+        "c3",
+        "callout",
+        "kind:box",
+        "shape:rounded_rectangle",
+        "wrap",
+        "align:center",
+        "valign:middle",
+        "size:16",
+        "spacing:1.15",
+        "latin:Arial",
+        "japanese:Yu_Gothic_UI"
+      ]
+    },
+    {
+      "actual": {
+        "baselines_pt": [
+          254.45,
+          276.53,
+          298.61
+        ],
+        "drawings": 0,
+        "fonts": {
+          ".": "ArialMT",
+          "T": "ArialMT",
+          "a": "ArialMT",
+          "e": "ArialMT",
+          "i": "ArialMT",
+          "l": "ArialMT",
+          "m": "ArialMT",
+          "r": "ArialMT",
+          "s": "ArialMT",
+          "t": "ArialMT",
+          "x": "ArialMT",
+          "、": "YuGothicUI-Regular",
+          "。": "YuGothicUI-Regular",
+          "が": "YuGothicUI-Regular",
+          "く": "YuGothicUI-Regular",
+          "け": "YuGothicUI-Regular",
+          "で": "YuGothicUI-Regular",
+          "な": "YuGothicUI-Regular",
+          "の": "YuGothicUI-Regular",
+          "は": "YuGothicUI-Regular",
+          "よ": "YuGothicUI-Regular",
+          "り": "YuGothicUI-Regular",
+          "る": "YuGothicUI-Regular",
+          "を": "YuGothicUI-Regular",
+          "中": "YuGothicUI-Regular",
+          "囲": "YuGothicUI-Regular",
+          "図": "YuGothicUI-Regular",
+          "字": "YuGothicUI-Regular",
+          "形": "YuGothicUI-Regular",
+          "文": "YuGothicUI-Regular",
+          "枠": "YuGothicUI-Regular",
+          "狭": "YuGothicUI-Regular",
+          "範": "YuGothicUI-Regular",
+          "置": "YuGothicUI-Regular"
+        },
+        "glyphs": 42,
+        "ink_pt": [
+          730.82,
+          241.202,
+          901.225,
+          298.797
+        ],
+        "line_extents_pt": [
+          [
+            730.82,
+            901.225
+          ],
+          [
+            736.94,
+            895.247
+          ],
+          [
+            745.22,
+            886.737
+          ]
+        ],
+        "lines": 3,
+        "sizes_pt": [
+          15.96
+        ]
+      },
+      "element": {
+        "actual_area": [
+          716.0,
+          200.0,
+          200.0,
+          148.0
+        ],
+        "area": [
+          716.0,
+          200.0,
+          200.0,
+          140.0
+        ],
+        "content": [
+          {
+            "kind": "text",
+            "text": "図形の中では、文字を置ける範囲が枠より狭くなる。Text area is smaller."
+          }
+        ],
+        "description": "tags: c3 callout",
+        "id": "rounded_rectangle_bottom",
+        "kind": "box",
+        "outside_parts": [
+          {
+            "area": [
+              771.0,
+              340.0,
+              10.0,
+              8.0
+            ],
+            "part": "tail"
+          }
+        ],
+        "role": "sample",
+        "shape": "rounded_rectangle",
+        "style": {
+          "align": "center",
+          "bold": false,
+          "color": "20252B",
+          "corner_radius_pt": 12.0,
+          "emphasis_color": "C43D3D",
+          "fill": "F3F6FA",
+          "font_japanese": "Yu Gothic UI",
+          "font_latin": "Arial",
+          "font_math": "Cambria Math",
+          "line_color": "183153",
+          "line_spacing": 1.15,
+          "line_width_pt": 1.0,
+          "min_size_pt": 8.0,
+          "padding_pt": 6.0,
+          "phrase_wrap": false,
+          "size_pt": 16.0,
+          "tail_at": 0.3,
+          "tail_side": "bottom",
+          "valign": "middle",
+          "word_wrap": true
+        },
+        "tail": {
+          "at": 0.3,
+          "length_pt": 8.0,
+          "points": [
+            [
+              771.0,
+              340.0
+            ],
+            [
+              776.0,
+              348.0
+            ],
+            [
+              781.0,
+              340.0
+            ]
+          ],
+          "side": "bottom",
+          "width_pt": 10.0
+        }
+      },
+      "element_id": "rounded_rectangle_bottom",
+      "slide_id": "callouts",
+      "tags": [
+        "callouts",
+        "c3",
+        "callout",
+        "kind:box",
+        "shape:rounded_rectangle",
+        "wrap",
+        "align:center",
+        "valign:middle",
+        "size:16",
+        "spacing:1.15",
+        "latin:Arial",
+        "japanese:Yu_Gothic_UI"
+      ]
+    },
+    {
+      "actual": {
+        "baselines_pt": [
           39.9
         ],
         "drawings": 0,
@@ -35555,9 +36875,9 @@
       "pypdfium2": "5.14.0",
       "python-pptx": "1.0.2"
     },
-    "powerpoint": "16.0.20527.20150"
+    "powerpoint": "16.0.20527.20196"
   },
-  "generated_at": "2026-11-13T11:55:35+00:00",
+  "generated_at": "2026-11-16T17:13:38+00:00",
   "measure_version": "9",
   "schema_version": 1,
   "slides": [
@@ -35591,6 +36911,10 @@
     },
     {
       "id": "shapes",
+      "unassigned_glyphs": 0
+    },
+    {
+      "id": "callouts",
       "unassigned_glyphs": 0
     },
     {

@@ -553,3 +553,20 @@ def test_math_line_extents_include_radical_sign(tmp_path):
     assert two.drawings == 1 and len(two.lines) == 2
     assert two.lines[0].left == pytest.approx(43) and two.lines[0].right == pytest.approx(70)
     assert two.lines[1].left == pytest.approx(44) and two.lines[1].right == pytest.approx(44 + width("Next"))
+
+
+def test_callout_outline_is_not_a_math_line(tmp_path):
+    """吹き出しの輪郭（外接矩形がしっぽまでの範囲 actual_area）は、文字色と同じでも数式の線にしない。"""
+    note = element(
+        "note", (300, 100, 160, 60), [math("a")], kind="box", shape="rectangle", actual_area=[292, 100, 168, 60]
+    )
+    path = write_pdf(
+        tmp_path / "deck.pdf",
+        [
+            polygon([(300, 100), (460, 100), (460, 160), (300, 160), (300, 135), (292, 130), (300, 125)]),
+            glyphs(310, 140, "a", font="tiro"),
+        ],
+    )
+    reading = read_pdf(path, scene([note]))[0]
+    assert reading.elements["note"].drawings == 0
+    assert reading.elements["note"].ink[0] == pytest.approx(310, abs=1)

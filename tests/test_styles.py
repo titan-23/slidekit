@@ -56,7 +56,10 @@ def test_style_key_tables_follow_element_kinds():
     }
     assert "word_wrap" in STYLE_KEYS["text"] and "word_wrap" in STYLE_KEYS["equation"]
     assert STYLE_KEYS["line"] == STYLE_KEYS["arrow"] == styles.STROKE_KEYS
-    assert STYLE_KEYS["box"] - STYLE_KEYS["text"] == {"corner_radius_pt"}
+    # box だけの書式は角丸の半径と吹き出しのしっぽ。しっぽの既定値は outline の定数で、LIBRARY_DEFAULTS には置かない。
+    assert STYLE_KEYS["box"] - STYLE_KEYS["text"] == {"corner_radius_pt"} | styles.TAIL_KEYS
+    assert styles.TAIL_KEYS == {"tail_side", "tail_at", "tail_width_pt", "tail_length_pt"}
+    assert not styles.TAIL_KEYS & set(LIBRARY_DEFAULTS)
     assert STYLE_KEYS["image"] == STYLE_KEYS["group"] == frozenset()
     assert DEFAULT_KINDS == {"text", "equation", "box", "table_cell", "table_header", "line", "arrow"}
     assert DEFAULT_CHAINS["table_header"] == ("box", "table_cell", "table_header")
@@ -116,6 +119,18 @@ def test_aliases_are_suggested_only_when_the_kind_accepts_them():
     [(name, found, reason)] = unknown_names("line", ["background"])
     assert name == "background" and "fill" not in found and reason is None
     assert unknown_names("line", ["colour"]) == [("colour", ("line_color",), None)]
+    # 吹き出しの名前は box のしっぽの書式を案内する。1 つの名前が示す行き先は 1 つである。
+    for alias, target in (
+        ("tail", "tail_side"),
+        ("callout", "tail_side"),
+        ("pointer", "tail_side"),
+        ("pointer_side", "tail_side"),
+        ("tail_position", "tail_at"),
+        ("tail_width", "tail_width_pt"),
+        ("tail_length", "tail_length_pt"),
+    ):
+        assert unknown_names("box", [alias]) == [(alias, (target,), None)]
+    assert unknown_names("text", ["tail_side"]) == [("tail_side", (), "は text では使えません")]
 
 
 def test_check_names_explains_unsupported_names():
@@ -192,6 +207,12 @@ def test_extra_names_are_accepted_and_suggested():
         ("fill", "none"),
         ("line_color", "surface"),
         ("size_pt", None),
+        ("tail_side", "left"),
+        ("tail_side", "none"),
+        ("tail_at", 0),
+        ("tail_at", 1),
+        ("tail_width_pt", 0.5),
+        ("tail_length_pt", 14),
     ],
 )
 def test_check_style_value_accepts_valid_values(name, value):
@@ -216,6 +237,12 @@ def test_check_style_value_accepts_valid_values(name, value):
         ("padding_pt", -2, "の値は 0 以上の有限値にしてください"),
         ("padding_pt", {"left": -1}, "の値は 0 以上の有限値にしてください"),
         ("padding_pt", {"lft": 3}, "に未知の辺があります: lft（候補: left）"),
+        ("tail_side", "center", "は left、right、top、bottom、none のどれかで指定してください"),
+        ("tail_at", 1.5, "は 0 以上 1 以下の数で指定してください"),
+        ("tail_at", -0.1, "は 0 以上 1 以下の数で指定してください"),
+        ("tail_at", True, "は 0 以上 1 以下の数で指定してください"),
+        ("tail_width_pt", 0, "は正の有限の数で指定してください"),
+        ("tail_length_pt", float("inf"), "は正の有限の数で指定してください"),
     ],
 )
 def test_check_style_value_rejects_invalid_values(name, value, message):

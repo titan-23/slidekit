@@ -57,6 +57,8 @@ _LINE_END_FACTOR = 3.0
 _DEFAULT_LINE_PT = 1.0
 # 始点と終点を結ぶ線として扱う図形の形（`a:prstGeom` の `prst`）。
 _LINE_GEOMETRIES = frozenset({"line", "straightConnector1"})
+# 吹き出しの本体の位置の式（writer._custom_geometry の a:gd の fmla。`*/ w 定数 W`）。
+_BODY_GUIDE = re.compile(r"\*/ ([wh]) (-?\d+) (\d+)")
 # 範囲を求める図形の要素。
 _SHAPE_TAGS = frozenset(tag("p", name) for name in ("sp", "cxnSp", "pic", "graphicFrame"))
 # 関係の識別子を指す属性（`r:` の名前空間）の値。ページ全体と、`mc:Fallback` の中だけ。
@@ -107,6 +109,33 @@ def _math_rectangle(shape):
     if min(width, height) <= 0:
         raise ValueError("数式の図形の幅・高さは正にする")
     return Box(x, y, x + width, y + height)
+
+
+def _body_rectangle(shape, rectangle):
+    """吹き出しの本体の矩形。a:custGeom の式 bL・bT・bR・bB（`*/ w 定数 W` の形）と a:xfrm の矩形 rectangle から求める。
+
+    式のない図形（既定図形と、slidekit が書かない自由図形）は rectangle をそのまま返す。
+    """
+    from .pdf import Box
+
+    guides = {
+        node.get("name"): (node.get("fmla") or "").strip()
+        for node in shape.findall("p:spPr/a:custGeom/a:gdLst/a:gd", NS)
+    }
+    values = {}
+    for name in ("bL", "bT", "bR", "bB"):
+        match = _BODY_GUIDE.fullmatch(guides.get(name, ""))
+        if match is None or int(match.group(3)) <= 0:
+            return rectangle
+        axis, value, base = match.group(1), int(match.group(2)), int(match.group(3))
+        values[name] = value / base * (rectangle.width if axis == "w" else rectangle.height)
+    body = Box(
+        rectangle.x0 + values["bL"],
+        rectangle.y0 + values["bT"],
+        rectangle.x0 + values["bR"],
+        rectangle.y0 + values["bB"],
+    )
+    return body if not body.is_empty and _contains(rectangle, body, 0.01) else rectangle
 
 
 def _contains(outer, inner, tolerance: float = _EPSILON) -> bool:
@@ -233,8 +262,13 @@ def crop_rectangle(
     math_fonts: Iterable[str] = (),
     others: Iterable = (),
     neighbors: Iterable[dict] = (),
+    shape_rectangle=None,
 ) -> tuple[Any, dict]:
     """数式の図形自身の描画と枠線を含む切り出し範囲を、変換した PDF のページから求める。
+
+    `rectangle` は自身の文字を判定する矩形で、`shape_rectangle` は図形の a:xfrm の矩形である（省くと rectangle）。
+    吹き出しでは rectangle を本体にし、shape_rectangle をしっぽまでの範囲にする。切り出しの範囲・上限・枠線・図形の枠の判定は
+    shape_rectangle で、1・2 の自身の文字の判定は rectangle で行う（しっぽの側の帯にある隣の要素の文字を含めないため）。
 
     `traces` は `page.spans()`、`drawings` は `page.drawings()` の結果（`slidekit.pdf` のページ。ページごとに 1 回求めて使い回す）。
     PowerPoint は図形ごとに続けて描き、数式の線（伸びる括弧・根号・分数線）はその構造の最初の字形より前に描く。
@@ -264,8 +298,9 @@ def crop_rectangle(
     from .pdf_layout import _font_name
 
     rectangle = Box.of(rectangle)
+    outer = rectangle if shape_rectangle is None else Box.of(shape_rectangle) | rectangle
     probe = _expanded(rectangle, tolerance_pt)
-    limit = _expanded(rectangle, max_margin_pt) & page.rect
+    limit = _expanded(outer, max_margin_pt) & page.rect
     blocked = [_expanded(Box.of(other), tolerance_pt) for other in others]
     regions = [_Region(item) for item in neighbors]
     math_fonts = set(math_fonts)
@@ -278,7 +313,7 @@ def crop_rectangle(
         return inside(rectangle, x, y) or (inside(probe, x, y) and probe.x0 <= (box[0] + box[2]) / 2 <= probe.x1)
 
     def frame_like(box) -> bool:
-        return all(abs(a - b) <= 1.0 for a, b in zip(box, rectangle))
+        return all(abs(a - b) <= 1.0 for a, b in zip(box, outer))
 
     def foreign(box) -> bool:
         return any(region.drew(box, probe) for region in regions)
@@ -288,7 +323,7 @@ def crop_rectangle(
         (drawing for drawing in drawings if drawing.kind == "f" and drawing.fill_opacity > 0),
         key=lambda drawing: drawing.seqno,
     )
-    wanted = rectangle
+    wanted = outer
     # 含めた描画と文字の範囲。上限を超えたときに、上限の外の部分に掛かる要素を探す。
     included = []
 
@@ -357,7 +392,7 @@ def crop_rectangle(
             if box.intersects(probe):
                 include(box)
     if outline_pt > 0:
-        include(_expanded(rectangle, outline_pt / 2 + 1 / scale))
+        include(_expanded(outer, outline_pt / 2 + 1 / scale))
     clipped = not _contains(limit, wanted)
     nearby = []
     if clipped:
@@ -365,11 +400,11 @@ def crop_rectangle(
         nearby = [
             region.id
             for region in regions
-            if not region.contains(rectangle) and any(region.reach.intersects(part) for part in beyond)
+            if not region.contains(outer) and any(region.reach.intersects(part) for part in beyond)
         ]
     crop = _snap_outward(wanted & limit, scale) & page.rect
     return crop, {
-        "margin_pt": _margins(rectangle, crop),
+        "margin_pt": _margins(outer, crop),
         "clipped": clipped,
         "outline_pt": outline_pt,
         "nearby_elements": list(dict.fromkeys(nearby)),
@@ -448,10 +483,13 @@ def _page_crops(page, shapes: list[dict], scale: float, max_margin_pt: float) ->
     results = []
     for shape in shapes:
         rectangle = Box.of(shape["rectangle_pt"])
-        others = [other["rectangle_pt"] for other in shapes if other is not shape]
+        # 吹き出しは本体（body_pt）で自身の文字を判定し、しっぽまでの範囲（rectangle_pt）を切り出す。
+        body = Box.of(shape["body_pt"]) if shape.get("body_pt") else rectangle
+        others = [other.get("body_pt") or other["rectangle_pt"] for other in shapes if other is not shape]
         crop, details = crop_rectangle(
             page,
-            rectangle,
+            body,
+            shape_rectangle=rectangle,
             outline_pt=shape["outline_pt"],
             traces=traces,
             drawings=drawings,
@@ -481,7 +519,8 @@ def _page_crops(page, shapes: list[dict], scale: float, max_margin_pt: float) ->
 def render_page_crops(pdf: str, index: int, shapes: list[dict], scale: float, max_margin_pt: float) -> list[dict]:
     """PDF の 1 ページから、数式ごとの互換画像を切り出す。子プロセスでも動かすことができる。
 
-    `shapes` は `[{"key", "rectangle_pt", "outline_pt", "frame_pt", "math_fonts", "neighbors"}]`。`frame_pt`（互換画像の図形の範囲）を
+    `shapes` は `[{"key", "rectangle_pt", "body_pt", "outline_pt", "frame_pt", "math_fonts", "neighbors"}]`。`body_pt` は吹き出しの
+    本体の矩形（`_body_rectangle`）で、省くと rectangle_pt で自身の文字を判定する。`frame_pt`（互換画像の図形の範囲）を
     省くと、切り出す範囲そのものを画像にする。`math_fonts` は数式の書体名で、省くと枠の外へはみ出した数式の文字を探さない。
     `neighbors` は同じページのほかの要素の範囲（`crop_rectangle` の引数）で、省くとほかの要素の描画を区別しない。
     戻り値は `[{"key", "crop_pt", "margin_pt", "clipped", "outline_pt", "nearby_elements", "png"}]`。
@@ -769,6 +808,7 @@ def _wrap_math(
                     "slide_id": root.find("p:cSld", NS).get("name"),
                     "element_id": shape.find("p:nvSpPr/p:cNvPr", NS).get("name"),
                     "rectangle": rectangle,
+                    "body": _body_rectangle(shape, rectangle),
                     "frame": frame,
                     "outline_pt": outline_width_pt(shape),
                     "image": media_name,
@@ -827,6 +867,7 @@ def _read_final_form(parts: dict[str, bytes], ordered: list[str]) -> list[dict]:
                     "slide_id": root.find("p:cSld", NS).get("name"),
                     "element_id": original.find("p:nvSpPr/p:cNvPr", NS).get("name"),
                     "rectangle": rectangle,
+                    "body": _body_rectangle(original, rectangle),
                     "frame": frame,
                     "outline_pt": outline_width_pt(original),
                     "image": image,
@@ -915,6 +956,7 @@ def finalize_math(
             {
                 "key": key,
                 "rectangle_pt": list(shape["rectangle"]),
+                **({"body_pt": list(shape["body"])} if list(shape["body"]) != list(shape["rectangle"]) else {}),
                 "outline_pt": shape["outline_pt"],
                 "frame_pt": list(shape["frame"]),
                 "math_fonts": shape["math_fonts"],

@@ -329,8 +329,13 @@ def _nonnegative(value, name: str) -> float:
 
 
 def _shape(shape) -> str:
-    if shape not in _SHAPES:
-        raise _style_error(f"未対応の図形です: {shape}（候補: {'、'.join(_SHAPES)}）", setting="shape", value=shape)
+    if not isinstance(shape, str) or shape not in _SHAPES:
+        hint = (
+            "。吹き出しは tail_side で指定します" if shape in ("callout", "speech_bubble", "wedgeRectCallout") else ""
+        )
+        raise _style_error(
+            f"未対応の図形です: {shape}（候補: {'、'.join(_SHAPES)}）{hint}", setting="shape", value=shape
+        )
     return shape
 
 

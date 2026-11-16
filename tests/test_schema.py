@@ -925,3 +925,31 @@ def test_role_skip_checks_accept_only_warning_and_info_codes():
     )
     assert any("診断の識別子で指定してください" in message for message in messages)
     assert not any("math_not_marked" in message for message in messages)
+
+
+def test_tail_items_in_roles_and_defaults():
+    # 役割はしっぽの 4 項目を、[defaults]・[defaults.box] は寸法と位置だけを受け付ける。
+    theme = merge(
+        BUNDLED_THEME,
+        {
+            "defaults": {"tail_length_pt": 8, "box": {"tail_width_pt": 10, "tail_at": 0.3}},
+            "roles": {"callout": {"inherits": "note", "tail_side": "left", "tail_at": 0.2, "tail_width_pt": 12}},
+        },
+    )
+    assert check_settings("theme", theme, file="theme.toml") == []
+    wrong = merge(
+        BUNDLED_THEME,
+        {
+            "defaults": {"tail_side": "left", "box": {"tail_side": "right"}},
+            "roles": {"callout": {"inherits": "note", "tail_side": "center", "tail_at": 2}},
+        },
+    )
+    messages = {problem.key: str(problem) for problem in check_settings("theme", wrong, file="theme.toml")}
+    assert set(messages) == {
+        "defaults.tail_side",
+        "defaults.box.tail_side",
+        "roles.callout.tail_side",
+        "roles.callout.tail_at",
+    }
+    assert "しっぽの有無は役割と要素で決めます" in messages["defaults.box.tail_side"]
+    assert "left、right、top、bottom、none のどれか" in messages["roles.callout.tail_side"]

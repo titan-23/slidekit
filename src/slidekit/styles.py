@@ -44,13 +44,16 @@ TEXT_KEYS = frozenset(
 )
 FRAME_KEYS = frozenset({"fill", "line_color", "line_width_pt", "dashed"})
 STROKE_KEYS = frozenset({"line_color", "line_width_pt", "dashed"})
+# 吹き出しのしっぽ（box の rectangle・rounded_rectangle だけ）。既定値は outline の定数で、LIBRARY_DEFAULTS には置かない。
+TAIL_KEYS = frozenset({"tail_side", "tail_at", "tail_width_pt", "tail_length_pt"})
+TAIL_SIDE_VALUES = ("left", "right", "top", "bottom", "none")
 
 # 要素・セルの引数で受け付ける書式。
 STYLE_KEYS = MappingProxyType(
     {
         "text": TEXT_KEYS | FRAME_KEYS,
         "equation": TEXT_KEYS | FRAME_KEYS,
-        "box": TEXT_KEYS | FRAME_KEYS | {"corner_radius_pt"},
+        "box": TEXT_KEYS | FRAME_KEYS | {"corner_radius_pt"} | TAIL_KEYS,
         "table_cell": TEXT_KEYS | FRAME_KEYS,
         "table_header": TEXT_KEYS | FRAME_KEYS,
         "line": STROKE_KEYS,
@@ -79,7 +82,7 @@ DEFAULT_KINDS = frozenset(DEFAULT_CHAINS)  # [defaults] の下で受け付ける
 
 # 役割だけが持ち、書式へ写さない項目。
 ROLE_ONLY_KEYS = frozenset({"inherits", "allowed_slide_ids", "allowed_content", "restricted", "skip_checks"})
-ROLE_KEYS = TEXT_KEYS | FRAME_KEYS | {"corner_radius_pt"} | ROLE_ONLY_KEYS
+ROLE_KEYS = TEXT_KEYS | FRAME_KEYS | {"corner_radius_pt"} | TAIL_KEYS | ROLE_ONLY_KEYS
 PAINT_KEYS = frozenset({"fill", "line_color"})  # "none" を受け付ける色の項目
 COLOR_KEYS = PAINT_KEYS | {"color", "emphasis_color"}
 
@@ -153,6 +156,13 @@ ALIASES = MappingProxyType(
         "vertical_align": "valign",
         "line_height": "line_spacing",
         "line_height_pt": "line_spacing_pt",
+        "tail": "tail_side",
+        "callout": "tail_side",
+        "pointer": "tail_side",
+        "pointer_side": "tail_side",
+        "tail_position": "tail_at",
+        "tail_width": "tail_width_pt",
+        "tail_length": "tail_length_pt",
     }
 )
 
@@ -310,6 +320,11 @@ def _boolean(value: Any) -> str | None:
     return None if isinstance(value, bool) else "は真偽値で指定してください"
 
 
+def _fraction(value: Any) -> str | None:
+    number = _number(value)
+    return None if number is not None and 0 <= number <= 1 else "は 0 以上 1 以下の数で指定してください"
+
+
 def _choice(values: tuple[str, ...]):
     def check(value: Any) -> str | None:
         return (
@@ -331,7 +346,9 @@ def _color(value: Any) -> str | None:
 
 
 _VALUE_RULES = {
-    **dict.fromkeys(("size_pt", "min_size_pt", "line_spacing", "line_spacing_pt"), _positive),
+    **dict.fromkeys(
+        ("size_pt", "min_size_pt", "line_spacing", "line_spacing_pt", "tail_width_pt", "tail_length_pt"), _positive
+    ),
     **dict.fromkeys(("line_width_pt", "corner_radius_pt"), _non_negative),
     **dict.fromkeys(("bold", "word_wrap", "phrase_wrap", "dashed"), _boolean),
     **dict.fromkeys(("font_japanese", "font_latin", "font_math"), _font),
@@ -339,6 +356,8 @@ _VALUE_RULES = {
     "align": _choice(ALIGN_VALUES),
     "valign": _choice(VALIGN_VALUES),
     "padding_pt": _padding,
+    "tail_side": _choice(TAIL_SIDE_VALUES),
+    "tail_at": _fraction,
 }
 
 

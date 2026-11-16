@@ -751,3 +751,311 @@ def test_structural_errors_have_diagnostic_codes(make_deck):
     with pytest.raises(InputError) as caught:
         deck.slide(id="size")
     assert caught.value.code == "invalid_page_size"
+
+
+# ---- 吹き出し ----
+
+CALLOUT = (
+    '[roles.callout]\ninherits = "note"\nfill = "none"\nline_color = "text"\nline_width_pt = 1\n'
+    'padding_pt = 6\ntail_side = "left"\ntail_at = 0.2\n'
+)
+TAIL_NAMES = {"tail_side", "tail_at", "tail_width_pt", "tail_length_pt"}
+
+
+def setting(issue):
+    """続行できる誤りの診断の観測値の setting（なければ None）。同じ要素と識別子の誤りは 1 件にまとまる。"""
+    [observations] = issue["observations"] or [{}]
+    return observations.get("setting")
+
+
+def issues_of(scene):
+    return {
+        (issue["element_id"], issue["code"], (observations or {}).get("setting"))
+        for issue in scene.get("issues", [])
+        for observations in issue["observations"] or [None]
+    }
+
+
+def callout_deck(make_deck, theme=None, *, collect=False):
+    deck = make_deck(theme, collect=collect)
+    deck.project.fonts = FakeFonts()
+    return deck
+
+
+def test_callout_scene_has_tail_actual_area_and_outside_parts(make_deck):
+    deck = callout_deck(make_deck)
+    slide = deck.slide(id="page", kind="blank")
+    slide.box(
+        id="note", area=(420, 150, 240, 70), text="補足", fill="none", line_color="text", tail_side="left", tail_at=0.2
+    )
+    slide.box(
+        id="hint",
+        area=(100, 80, 200, 50),
+        shape="rounded_rectangle",
+        text="角丸",
+        corner_radius_pt=6,
+        tail_side="bottom",
+    )
+    slide.box(id="plain", area=(100, 300, 200, 50), text="しっぽなし")
+    found = by_id(deck.to_dict()["slides"][0])
+    note = found["note"]
+    assert note["actual_area"] == [412, 150, 248, 70]
+    assert note["outside_parts"] == [{"part": "tail", "area": [412, 159, 8, 10]}]
+    assert note["tail"] == {
+        "side": "left",
+        "at": 0.2,
+        "width_pt": 10,
+        "length_pt": 8,
+        "points": [[420, 159], [412, 164], [420, 169]],
+    }
+    assert note["style"]["tail_side"] == "left" and note["style"]["tail_at"] == 0.2
+    assert found["hint"]["tail"]["points"] == [[195, 130], [200, 138], [205, 130]]
+    assert found["hint"]["actual_area"] == [100, 80, 200, 58]
+    # しっぽのない要素の場面は今までと同じ（項目を加えない）。
+    assert not {"tail", "actual_area", "outside_parts"} & set(found["plain"])
+    assert not TAIL_NAMES & set(found["plain"]["style"])
+
+
+def test_callout_role_layers_and_cancellation(make_deck):
+    deck = callout_deck(make_deck, CALLOUT)
+    slide = deck.slide(id="page", kind="blank")
+    slide.box(id="role", area=(420, 100, 240, 60), role="callout", text="役割")
+    slide.box(id="moved", area=(420, 200, 240, 60), role="callout", text="上書き", tail_side="right", tail_at=0.8)
+    slide.box(id="kept", area=(420, 300, 240, 60), role="callout", text="None", tail_side=None)
+    slide.box(id="cancelled", area=(420, 400, 240, 60), role="callout", text="取り消し", tail_side="none")
+    slide.box(
+        id="styled",
+        area=(100, 400, 240, 60),
+        role="callout",
+        text="style",
+        style={"tail_side": "top"},
+        tail_side="bottom",
+    )
+    found = by_id(deck.to_dict()["slides"][0])
+    assert (found["role"]["tail"]["side"], found["role"]["tail"]["at"]) == ("left", 0.2)
+    assert (found["moved"]["tail"]["side"], found["moved"]["tail"]["at"]) == ("right", 0.8)
+    assert found["kept"]["tail"]["side"] == "left"
+    # none は役割のしっぽを取り消し、書式からしっぽの項目を除く。
+    assert "tail" not in found["cancelled"] and not TAIL_NAMES & set(found["cancelled"]["style"])
+    # キーワード引数が style= より優先する。
+    assert found["styled"]["tail"]["side"] == "bottom"
+
+
+def test_tail_items_do_not_reach_other_elements(make_deck):
+    theme = CALLOUT + "[defaults]\ntail_length_pt = 12\n[defaults.box]\ntail_width_pt = 14\n"
+    deck = callout_deck(make_deck, theme)
+    slide = deck.slide(id="page", kind="blank")
+    slide.text(id="text", area=(40, 40, 200, 40), role="callout", text="文字")
+    slide.box(id="oval", area=(40, 100, 200, 40), shape="ellipse", role="callout", text="楕円")
+    slide.box(id="plain", area=(40, 160, 200, 40), text="図形")
+    slide.line(id="line", start=(40, 220), end=(240, 220))
+    slide.box(id="callout", area=(300, 160, 200, 40), text="吹き出し", tail_side="bottom")
+    slide.table(id="table", rows=[["a"]], row_keys=["r"], column_keys=["c"], area=Rect(300, 300, 200, None))
+    scene = deck.to_dict()
+    found = by_id(scene["slides"][0])
+    # 役割のしっぽが text・ellipse の box に当たってもエラーにせず、しっぽも付けない。
+    assert "issues" not in scene
+    for element_id, element in found.items():
+        if element_id != "callout":
+            assert not TAIL_NAMES & set(element.get("style") or {}), element_id
+            assert "tail" not in element, element_id
+    # [defaults]・[defaults.box] の寸法は、しっぽの付く box ではライブラリの既定より優先する。
+    assert (found["callout"]["tail"]["width_pt"], found["callout"]["tail"]["length_pt"]) == (14, 12)
+    assert found["callout"]["style"]["tail_width_pt"] == 14
+
+
+def test_callout_auto_size_matches_box_without_tail(make_deck):
+    deck = callout_deck(make_deck)
+    slide = deck.slide(id="page", kind="blank")
+    plain = slide.box(id="plain", area=(40, 40, None, None), text="$O(\\log M)$", line_color="text")
+    callout = slide.box(
+        id="callout",
+        area=(40, 140, None, None),
+        text="$O(\\log M)$",
+        line_color="text",
+        tail_side="right",
+        tail_length_pt=14,
+        tail_width_pt=12,
+    )
+    assert (callout.area.w, callout.area.h) == (plain.area.w, plain.area.h)
+    rounded = slide.box(
+        id="rounded", area=(40, 240, 160, None), shape="rounded_rectangle", text="角丸の文", tail_side="top"
+    )
+    other = slide.box(id="other", area=(40, 340, 160, None), shape="rounded_rectangle", text="角丸の文")
+    assert rounded.area.h == other.area.h
+    tail = by_id(deck.to_dict()["slides"][0])["callout"]["tail"]
+    assert tail["points"][1][0] == pytest.approx(callout.area.x + callout.area.w + 14)
+
+
+def test_callout_shape_follows_the_last_area(make_deck):
+    deck = callout_deck(make_deck, collect=True)
+    slide = deck.slide(id="page", kind="blank")
+    box = slide.box(id="note", area=(420, 150, 240, 70), text="補足", tail_side="left", tail_at=0.2)
+    box.move(dx=-100, dy=10)
+    narrow = slide.box(id="narrow", area=(40, 300, 240, 40), text="狭くなる", tail_side="left")
+    narrow.area = Rect(40, 300, 240, 8)
+    scene = deck.to_dict()
+    found = by_id(scene["slides"][0])
+    assert found["note"]["tail"]["points"] == [[320, 169], [312, 174], [320, 179]]
+    # 場面を作るときに確かめ直し、付け根が辺に収まらなければ報告してしっぽを付けない。
+    assert "tail" not in found["narrow"] and not TAIL_NAMES & set(found["narrow"]["style"])
+    [issue] = [issue for issue in scene["issues"] if issue["element_id"] == "narrow"]
+    assert issue["code"] == "invalid_style" and setting(issue) == "tail_width_pt"
+    assert issue["message"] == (
+        "ページ page の要素 narrow: しっぽの付け根の幅 tail_width_pt（10 pt）が左の辺の直線部分に収まりません"
+        "（辺の長さ 8 pt、角丸の半径 0 pt、指定できる最大の幅 8 pt）"
+    )
+    # 場面を作り直しても、同じ誤りを重ねて集めない。
+    assert len([issue for issue in deck.to_dict()["issues"] if issue["element_id"] == "narrow"]) == 1
+
+
+def test_callout_errors_continue_with_codes_and_settings(make_deck):
+    deck = callout_deck(make_deck, collect=True)
+    slide = deck.slide(id="page", kind="blank")
+    slide.box(id="side", area=(40, 40, 200, 40), text="辺", tail_side="center")
+    slide.box(id="at", area=(40, 100, 200, 40), text="位置", tail_side="left", tail_at=1.5, tail_width_pt=0)
+    slide.box(
+        id="oval", area=(40, 160, 200, 40), shape="ellipse", text="楕円", style={"tail_side": "left"}, tail_at=0.3
+    )
+    slide.box(id="missing", area=(40, 220, 200, 40), text="辺なし", tail_at=0.3, tail_length_pt=4)
+    slide.box(
+        id="wide", area=(40, 280, 200, 20), shape="rounded_rectangle", text="幅", corner_radius_pt=6, tail_side="left"
+    )
+    scene = deck.to_dict()
+    assert issues_of(scene) == {
+        ("side", "invalid_style", "tail_side"),
+        ("at", "invalid_style", "tail_at"),
+        ("at", "invalid_style", "tail_width_pt"),
+        ("oval", "invalid_style", "tail_at"),
+        ("oval", "invalid_style", "tail_side"),
+        ("missing", "invalid_style", "tail_at"),
+        ("missing", "invalid_style", "tail_length_pt"),
+        ("wide", "invalid_style", "tail_width_pt"),
+    }
+    messages = {error.element_id + error.details["setting"]: str(error) for error in deck.issues}
+    assert messages["missingtail_at"] == (
+        "ページ page の要素 missing: tail_at はしっぽを付けるときだけ使えます。"
+        "tail_side に left・right・top・bottom のどれかを指定してください"
+    )
+    assert messages["ovaltail_side"].endswith(
+        "tail_side は shape が rectangle か rounded_rectangle の box だけに指定できます（shape: ellipse）"
+    )
+    assert "辺の長さ 20 pt、角丸の半径 6 pt、指定できる最大の幅 8 pt" in messages["widetail_width_pt"]
+    found = by_id(scene["slides"][0])
+    # 誤った値を除いた結果、at は既定の位置・幅でしっぽを付ける。ほかはしっぽを付けない。
+    assert found["at"]["tail"]["at"] == 0.5 and found["at"]["tail"]["width_pt"] == 10
+    for element_id in ("side", "oval", "missing", "wide"):
+        assert "tail" not in found[element_id] and not TAIL_NAMES & set(found[element_id]["style"]), element_id
+
+
+def test_callout_rejects_rotation_and_flip(make_deck):
+    deck = callout_deck(make_deck, CALLOUT)
+    slide = deck.slide(id="page", kind="blank")
+    for arguments in ({"rotation": 90}, {"flip_h": True, "flip_v": True}):
+        with pytest.raises(InputError) as caught:
+            slide.box(id="turned", area=(40, 40, 200, 40), text="回転", role="callout", **arguments)
+        assert caught.value.code == "unsupported_argument"
+        assert caught.value.details["names"] == list(arguments)
+        assert str(caught.value).startswith("ページ page の要素 turned: しっぽのある box は回転・反転できません")
+    # しっぽを取り消した box と、しっぽのない box は回転できる。
+    slide.box(id="free", area=(40, 40, 200, 40), text="回転", role="callout", tail_side="none", rotation=90)
+    slide.box(id="plain", area=(40, 100, 200, 40), text="回転", rotation=90)
+
+
+def test_unknown_callout_shape_names_point_to_tail_side(make_deck):
+    deck = callout_deck(make_deck)
+    slide = deck.slide(id="page", kind="blank")
+    for operation in (
+        lambda: slide.box(id="bubble", area=(40, 40, 200, 40), shape="callout"),
+        lambda: slide.measure("吹き出し", kind="box", shape="wedgeRectCallout"),
+    ):
+        with pytest.raises(InputError, match="吹き出しは tail_side で指定します"):
+            operation()
+    with pytest.raises(InputError) as caught:
+        slide.box(id="star", area=(40, 40, 200, 40), shape="star")
+    assert "tail_side" not in str(caught.value)
+    with pytest.raises(InputError, match="tail_side は text では使えません"):
+        slide.text(id="text", area=(40, 40, 200, 40), text="文字", tail_side="left")
+
+
+def test_measure_reports_tail_items_on_ellipse(make_deck):
+    deck = callout_deck(make_deck, collect=True)
+    slide = deck.slide(id="page", kind="blank")
+    plain = slide.measure("長さ", kind="box", width=120)
+    assert slide.measure("長さ", kind="box", width=120, tail_side="left", tail_length_pt=20).height == plain.height
+    slide.measure("長さ", kind="box", shape="ellipse", width=120, tail_side="left")
+    assert [(error.code, error.details["setting"]) for error in deck.issues] == [("invalid_style", "tail_side")]
+
+
+def test_tail_toward_chooses_side_and_records_target(make_deck):
+    deck = callout_deck(make_deck, CALLOUT)
+    slide = deck.slide(id="page", kind="blank")
+    body = slide.text(id="body", area=(40, 120, 340, 200), text="本文")
+    slide.box(
+        id="auto", area=(410, 130, 220, 60), text="補足", line_color="text", tail_toward=body.anchor("right", at=0.2)
+    )
+    slide.box(id="role", area=(410, 260, 220, 60), role="callout", text="役割", tail_toward=(300, 100))
+    slide.box(id="fixed", area=(410, 400, 220, 60), text="固定", tail_side="left", tail_toward=(300, 100))
+    slide.box(id="below", area=(100, 400, 200, 40), text="下", tail_toward=body.anchor("bottom", gap=4))
+    found = by_id(deck.to_dict()["slides"][0])
+    # 横の距離 30 pt、縦の距離 0 で左の辺。付け根は指す点を辺へ垂直に下ろした位置（160 - 130 = 30 / 60）。
+    assert found["auto"]["tail"]["side"] == "left"
+    assert found["auto"]["tail"]["at"] == pytest.approx(0.5)
+    assert found["auto"]["tail"]["target"] == {"element_id": "body", "side": "right", "at": 0.2}
+    # 役割の tail_side は tail_toward が上書きし（縦の距離が大きいので上の辺）、引数の tail_side は辺を固定する。
+    assert found["role"]["tail"]["side"] == "top" and found["role"]["tail"]["target"] == {"point": [300, 100]}
+    assert found["fixed"]["tail"]["side"] == "left"
+    assert found["below"]["tail"]["side"] == "top"
+    assert found["below"]["tail"]["target"] == {"element_id": "body", "side": "bottom", "gap": 4}
+    # 長さは tail_length_pt のまま（先端は指す点まで伸ばさない）。
+    assert found["auto"]["tail"]["points"][1] == [402, 160]
+
+
+def test_tail_toward_errors(make_deck):
+    deck = callout_deck(make_deck, collect=True)
+    slide = deck.slide(id="page", kind="blank")
+    other = deck.slide(id="other", kind="blank")
+    target = other.text(id="target", area=(40, 40, 100, 40), text="別")
+    cases = [
+        (lambda: slide.box(id="kind", area=(40, 40, 200, 40), tail_toward="右"), "input_error"),
+        (lambda: slide.box(id="far", area=(40, 40, 200, 40), tail_toward=target.anchor("left")), "input_error"),
+        (
+            lambda: slide.box(id="oval", area=(40, 40, 200, 40), shape="ellipse", tail_toward=(0, 0)),
+            "unsupported_argument",
+        ),
+    ]
+    for operation, code in cases:
+        with pytest.raises(InputError) as caught:
+            operation()
+        assert caught.value.code == code
+    slide.box(id="inside", area=(40, 100, 200, 40), text="内側", tail_toward=(100, 120))
+    slide.box(id="wrong", area=(40, 200, 200, 40), text="固定", tail_side="right", tail_toward=(0, 220))
+    slide.box(id="both", area=(40, 300, 200, 40), text="両方", tail_at=0.3, tail_toward=(0, 320))
+    slide.box(id="cancel", area=(40, 400, 200, 40), text="none", tail_side="none", tail_toward=(0, 420))
+    scene = deck.to_dict()
+    assert issues_of(scene) == {
+        ("inside", "invalid_geometry", None),
+        ("wrong", "invalid_geometry", None),
+        ("both", "invalid_style", "tail_at"),
+        ("cancel", "invalid_style", "tail_side"),
+    }
+    found = by_id(scene["slides"][0])
+    assert "tail" not in found["inside"] and "tail" not in found["wrong"] and "tail" not in found["cancel"]
+    assert found["both"]["tail"]["side"] == "left" and "tail_at" not in found["both"]["style"]
+    message = next(issue["message"] for issue in scene["issues"] if issue["element_id"] == "wrong")
+    assert message == (
+        "ページ page の要素 wrong: tail_toward の点 (0, 220) が tail_side で指定した右の辺の外側にありません。"
+        "しっぽを向ける点は本体の外に置いてください"
+    )
+
+
+def test_tail_toward_points_in_groups_move_with_the_group(make_deck):
+    deck = callout_deck(make_deck)
+    slide = deck.slide(id="page", kind="blank")
+    holder = slide.group(id="holder", area=Rect(100, 100, 300, 200))
+    holder.box(id="note", area=(100, 20, 120, 40), text="補足", tail_toward=(20, 40))
+    holder.move(dx=50)
+    found = by_id(deck.to_dict()["slides"][0])
+    # まとまりの子の座標はまとまりの左上が原点で、まとまりを動かすと指す点も動く。
+    assert found["holder/note"]["tail"]["target"] == {"point": [170, 140]}
+    assert found["holder/note"]["tail"]["side"] == "left"

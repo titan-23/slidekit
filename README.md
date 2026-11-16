@@ -1,12 +1,12 @@
 # slidekit
 
 Python で内容と配置を書き、編集可能な PowerPoint 資料を生成するライブラリ。
-図形・表・数式・画像を扱い、PPTX、PDF、確認用画像をローカルで出力する。
+図形（吹き出しを含む）・表・数式・画像を扱い、PPTX、PDF、確認用画像をローカルで出力する。
 AI は生成コードの作成と修正を担当し、ライブラリ自身は AI を呼び出さない。
 
 ## 導入
 
-Python 3.12 以上と Windows 版 PowerPoint が要る。WSL で動作を確かめている。検証した版は [検証記録](validation.md) にある。
+Python 3.12 以上と Windows 版 PowerPoint が要る。WSL で動作を確かめている。
 既定の書体は Yu Gothic UI、Arial、Cambria Math である。寸法の計算に使うフォントファイルは、Windows のフォントのフォルダー（システムと利用者単位）から自動で探す。
 
 以下は `pyproject.toml` のあるディレクトリで実行する、WSL 向けの手順である。
@@ -86,7 +86,7 @@ def build(context):
 - [診断の一覧](docs/diagnostics.md)：機械検査の診断の判定と直し方
 - [数式の書き方](docs/math.md)：記法と対応する命令
 - [資料を作成する手順](workflows/authoring.md)：AI または人が資料を作るときの作業規則
-- [検証記録](validation.md)・[未解決の問題](docs/issues.md)
+- [未解決の問題](docs/issues.md)
 - [開発と資料作成の改善案](docs/improvements.md)
 
 PDF の読み取りと画像化には pypdfium2（PDFium）と pypdf を使う。依存関係とそのライセンスは [開発と依存関係](docs/usage.md#開発と依存関係) にある。

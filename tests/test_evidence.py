@@ -990,3 +990,32 @@ def test_render_page_image_matches_previous_pixel_hash(tmp_path):
         render_page_image(str(pdf), 2, str(tmp_path / "missing.png"))
     with pytest.raises(ValueError, match="画素の数"):
         pixel_digest(2, 2, bytes(11))
+
+
+def test_content_digest_ignores_tail_shape_but_tracks_pointed_element(tmp_path):
+    current = content_project(tmp_path)
+
+    def with_tail(**tail):
+        slide = content_page()
+        item(slide, "step").update(
+            actual_area=[292, 140, 128, 60],
+            outside_parts=[{"part": "tail", "area": [292, 165, 8, 10]}],
+            tail={
+                "side": "left",
+                "at": 0.5,
+                "width_pt": 10,
+                "length_pt": 8,
+                "points": [[300, 165], [292, 170], [300, 175]],
+                **tail,
+            },
+        )
+        return content_digest(slide, current)
+
+    # しっぽの辺・位置・寸法は座標と同じく内容に入れない。
+    base = content_digest(content_page(), current)
+    assert with_tail() == with_tail(side="right", at=0.2, width_pt=14) == base
+    # しっぽで指した要素（tail_toward）は内容に入れる。座標を指したときは入れない。
+    pointed = with_tail(target={"element_id": "lead", "side": "right"})
+    assert pointed != base and pointed == with_tail(target={"element_id": "lead", "side": "left", "at": 0.2})
+    assert with_tail(target={"element_id": "figure", "side": "right"}) != pointed
+    assert with_tail(target={"point": [100, 100]}) == base

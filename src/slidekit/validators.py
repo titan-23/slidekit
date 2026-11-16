@@ -221,6 +221,31 @@ def _drawn_area(element: dict, area: tuple) -> tuple:
     return area
 
 
+def _outer_area(element: dict, area: tuple) -> tuple:
+    """ページと本文領域のはみ出しに使う範囲。しっぽのある box（吹き出し）は actual_area（しっぽまでの範囲）である。"""
+    if element.get("kind") == "box" and element.get("actual_area") is not None:
+        actual = _rect(element.get("actual_area"))
+        if actual is not None:
+            return actual
+    return area
+
+
+def _outside_parts(element: dict) -> list[tuple[str, tuple]]:
+    """本体の外へ出る部分（場面の outside_parts）の (名前, 長方形) の列。形によらず、この項目だけを重なりの判定に使う。"""
+    parts = []
+    for item in element.get("outside_parts") or ():
+        if isinstance(item, Mapping) and (rect := _rect(item.get("area"))) is not None:
+            parts.append((str(item.get("part")), rect))
+    return parts
+
+
+def _tail_target(element: dict) -> Any:
+    """しっぽで指した要素の識別子（場面の tail.target）。なければ None。"""
+    tail = element.get("tail")
+    target = tail.get("target") if isinstance(tail, Mapping) else None
+    return target.get("element_id") if isinstance(target, Mapping) else None
+
+
 def _line_width(element: dict) -> float:
     width = (element.get("style") or {}).get("line_width_pt", LIBRARY_DEFAULTS["line_width_pt"])
     return float(width) if _number(width) and width >= 0 else float(LIBRARY_DEFAULTS["line_width_pt"])
@@ -497,21 +522,78 @@ def _check_sources(element: dict, documents: set, bibliography: set, report) -> 
             )
 
 
+def _check_parts(first: dict, second: dict, first_area: tuple, second_area: tuple, layout_of, report) -> None:
+    """本体の外へ出る部分（吹き出しのしっぽなど。場面の outside_parts）とほかの要素の重なり（element_overlap）。
+
+    部分ごとの長方形を、相手の本体（実際に描く範囲）と、相手の外へ出る部分と比べる。全体の外接長方形では判定しない。
+    観測値の part は部分の名前、part_element_id はその部分を持つ要素、related_part は相手の部分の名前である
+    （組の診断は要素の識別子の順に並ぶので、部分を持つ要素を観測値に書く）。
+    外す組：しっぽで指した要素（tail.target）、要素の actual_area 全体が収まる枠（`_inside_frame` と同じ条件）、
+    長方形を横切らない線（`_line_contact` が "cross" 以外）。
+    """
+    pairs = ((first, second, second_area, True), (second, first, first_area, False))
+    for owner, other, other_area, owner_first in pairs:
+        parts = _outside_parts(owner)
+        if not parts or _tail_target(owner) == other.get("id"):
+            continue
+        actual = _outer_area(owner, first_area if owner_first else second_area)
+        if _inside_frame(other, owner, other_area, actual, not owner_first, layout_of(other)):
+            continue
+        for name, rect in parts:
+            if other.get("kind") in _LINE_KINDS:
+                start, end = _point(other.get("start")), _point(other.get("end"))
+                if start is None or end is None or _line_contact(start, end, rect, _line_width(other)) != "cross":
+                    continue
+                observations = {"line": [list(start), list(end)], "part": name, "part_element_id": owner.get("id")}
+            else:
+                intersection = _intersection(rect, other_area)
+                if intersection is None:
+                    continue
+                observations = {"intersection": intersection, "part": name, "part_element_id": owner.get("id")}
+            report(
+                "element_overlap", "要素の重なりを確認する必要がある", owner, observations=observations, related=other
+            )
+        if owner_first:
+            for name, rect in parts:
+                for other_name, other_rect in _outside_parts(other):
+                    intersection = _intersection(rect, other_rect)
+                    if intersection is not None:
+                        report(
+                            "element_overlap",
+                            "要素の重なりを確認する必要がある",
+                            owner,
+                            observations={
+                                "intersection": intersection,
+                                "part": name,
+                                "part_element_id": owner.get("id"),
+                                "related_part": other_name,
+                            },
+                            related=other,
+                        )
+
+
 def _check_overlaps(valid: list[tuple[dict, tuple]], by_id: dict, layouts: Mapping, slide_id: Any, report) -> None:
     """要素の重なり。valid は描画順の（要素、実際に描く範囲）の列である（画像は actual_area。`_drawn_area`）。
 
     まとまり、背景と飾り（semantic）、祖先と子孫の組、線どうしの組、`anchor()` で結んだ線と接続先、
     枠の内側に置いた要素（`_inside_frame`）、端が図形の辺に接する線は判定しない。
+    吹き出しの本体は area で、しっぽ（outside_parts）は `_check_parts` で別に判定する。
     """
     candidates = [
         (element, area)
         for element, area in valid
         if element.get("kind") != "group" and element.get("semantic") not in {"background", "decoration"}
     ]
+
+    def layout_of(element: dict) -> Any:
+        return layouts.get((slide_id, element.get("id")))
+
     for index, (first, first_area) in enumerate(candidates):
         for second, second_area in candidates[index + 1 :]:
             if first.get("id") in _ancestors(second, by_id) or second.get("id") in _ancestors(first, by_id):
                 continue
+            if first.get("outside_parts") or second.get("outside_parts"):
+                _check_parts(first, second, first_area, second_area, layout_of, report)
             lines = [item for item in (first, second) if item.get("kind") in _LINE_KINDS]
             if len(lines) == 2:
                 # 接続線どうしの交差は図の意味に依存するため表示確認で扱う。
@@ -638,7 +720,7 @@ def validate_scene(scene: dict, project: Any, fonts: Any, *, layouts: Mapping | 
             area = _rect(element.get("area"), allow_zero=kind in _LINE_KINDS | {"group"})
             if area is None:
                 continue
-            painted = area
+            painted = _outer_area(element, area)
             if kind in _LINE_KINDS:
                 start, end = _point(element.get("start")), _point(element.get("end"))
                 if start is None or end is None or start == end:
@@ -657,13 +739,13 @@ def validate_scene(scene: dict, project: Any, fonts: Any, *, layouts: Mapping | 
                 content_area
                 and kind != "group"
                 and not str(element_id).startswith("_theme/")
-                and not _contains(content_area, area)
+                and not _contains(content_area, _outer_area(element, area))
             ):
                 report(
                     "content_area_overflow",
                     "要素が本文領域の外に配置されている",
                     element,
-                    observations={"area": area, "content_area": content_area},
+                    observations={"area": _outer_area(element, area), "content_area": content_area},
                 )
             bounds = _rect(element.get("layout_bounds"))
             if bounds is not None and not _contains(bounds, area):
